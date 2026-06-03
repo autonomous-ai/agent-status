@@ -128,7 +128,7 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
         if let t = snap.enriched?.aiTitle, !t.isEmpty {
             title = t
         } else {
-            title = snap.cwdBasename
+            title = snap.fallbackTitle
         }
 
         let bottom = bottomText(for: snap, now: now)

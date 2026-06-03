@@ -68,7 +68,7 @@ struct SessionRow: View {
         if settings.showAITitleAndLastPrompt, let t = snapshot.enriched?.aiTitle, !t.isEmpty {
             return t
         }
-        return snapshot.cwdBasename
+        return snapshot.fallbackTitle
     }
 
     /// Show the cwd as a small subtext only when we have an AI title (so the
