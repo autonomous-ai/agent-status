@@ -41,6 +41,12 @@ struct EnrichedSession: Hashable, Sendable {
     /// Sidechain tool calls are filtered out at ingestion.
     var recentTools: [CompletedTool] = []
 
+    /// The session's current task/todo list, in creation order, accumulated from
+    /// `TaskCreate`/`TaskUpdate` (or `TodoWrite`) calls in the transcript.
+    /// `.deleted` items are filtered out at ingestion. Empty for sessions that
+    /// don't use a task list.
+    var todos: [TodoItem] = []
+
     /// Equality view used by `SessionStore.uiEqual` to gate UI republish events.
     /// Keep this in sync with the row's actual visual dependencies — anything
     /// the menu-bar row reads must compare here.
@@ -60,9 +66,29 @@ struct EnrichedSession: Hashable, Sendable {
             && currentTool == other.currentTool
             && activeTools == other.activeTools
             && recentTools == other.recentTools
+            && todos == other.todos
     }
 
     static let empty = EnrichedSession()
+}
+
+/// Completion state of one task/todo item. Raw values match Claude Code's
+/// on-disk strings so `TodoStatus(rawValue:)` decodes them directly.
+enum TodoStatus: String, Hashable, Sendable {
+    case pending
+    case inProgress = "in_progress"
+    case completed
+    case deleted
+}
+
+/// One item in a session's task/todo list. Sourced from `TaskCreate`/`TaskUpdate`
+/// (`id` = the Task tool's `taskId`) or from `TodoWrite` (`id` = the item's index
+/// in the latest full list).
+struct TodoItem: Hashable, Sendable {
+    let id: String
+    let title: String           // subject (Task) / content (TodoWrite) / legacy name
+    let activeForm: String?     // present-continuous label, when provided
+    var status: TodoStatus
 }
 
 /// One in-flight tool call.

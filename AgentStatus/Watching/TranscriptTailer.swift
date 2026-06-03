@@ -32,6 +32,14 @@ actor TranscriptTailer {
     private static let recentToolsCap = 10
     private var activeAndRecentDirty = false
 
+    // Task-list accumulator. `taskList` is the master (including `.deleted`),
+    // built from TaskCreate/TaskUpdate (or replaced wholesale by TodoWrite);
+    // `state.todos` mirrors it with `.deleted` filtered out. `taskSeq` assigns
+    // sequential ids matching the Task tool's `1,2,3…` order (the tailer reads
+    // from offset 0, so every TaskCreate is seen).
+    private var taskList: [TodoItem] = []
+    private var taskSeq = 0
+
     init(sessionId: String, cwd: URL, pollInterval: TimeInterval = 1.0, perf: PerfStats? = nil) {
         self.sessionId = sessionId
         self.cwd = cwd
@@ -144,6 +152,8 @@ actor TranscriptTailer {
                 state = EnrichedSession()
                 toolStarts.removeAll()
                 recentToolsRing.removeAll()
+                taskList.removeAll()
+                taskSeq = 0
                 activeAndRecentDirty = false
             }
             guard size > offset else { return }
@@ -336,6 +346,7 @@ actor TranscriptTailer {
                         : (try? JSONSerialization.data(withJSONObject: input))
                     toolStarts[id] = (name: name, preview: preview, at: now, inputJSON: inputJSON)
                     activeAndRecentDirty = true
+                    applyTaskTool(name: name, input: input)
                 }
             default:
                 continue
@@ -367,6 +378,71 @@ actor TranscriptTailer {
         state.recentTools = Array(recentToolsRing.reversed())   // newest-first
         // currentTool kept nil — deprecated; UI consumers migrate next.
         state.currentTool = nil
+    }
+
+    /// Fold one task-list tool call into the accumulator, then mirror the
+    /// non-deleted items into `state.todos`. No-op for any other tool.
+    private func applyTaskTool(name: String, input: [String: Any]) {
+        switch name {
+        case "TodoWrite":  taskList = Self.applyTodoWrite(input)
+        case "TaskCreate": Self.applyTaskCreate(input, into: &taskList, seq: &taskSeq)
+        case "TaskUpdate": Self.applyTaskUpdate(input, into: &taskList)
+        default: return
+        }
+        state.todos = taskList.filter { $0.status != .deleted }
+    }
+
+    /// `TodoWrite` carries the entire current list each call → wholesale replace.
+    /// Item ids are positional. Pure + static for unit testing.
+    static func applyTodoWrite(_ input: [String: Any]) -> [TodoItem] {
+        guard let todos = input["todos"] as? [[String: Any]] else { return [] }
+        return todos.enumerated().compactMap { idx, t in
+            let title = (t["content"] as? String) ?? (t["title"] as? String) ?? ""
+            guard !title.isEmpty else { return nil }
+            let status = TodoStatus(rawValue: (t["status"] as? String) ?? "pending") ?? .pending
+            return TodoItem(id: String(idx), title: title,
+                            activeForm: nonEmpty(t["activeForm"]), status: status)
+        }
+    }
+
+    /// `TaskCreate` appends one task (modern `{subject, activeForm}`) or a batch
+    /// (legacy `{tasks:"<json [{name,status}]>"}`), assigning sequential ids.
+    static func applyTaskCreate(_ input: [String: Any], into list: inout [TodoItem], seq: inout Int) {
+        // Legacy batch form: `tasks` is a JSON-encoded array string.
+        if let raw = input["tasks"] as? String,
+           let data = raw.data(using: .utf8),
+           let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
+            for t in arr {
+                let title = (t["name"] as? String) ?? (t["subject"] as? String) ?? ""
+                guard !title.isEmpty else { continue }
+                let status = TodoStatus(rawValue: (t["status"] as? String) ?? "pending") ?? .pending
+                seq += 1
+                list.append(TodoItem(id: String(seq), title: title,
+                                     activeForm: nonEmpty(t["activeForm"]), status: status))
+            }
+            return
+        }
+        // Modern single-task form.
+        let title = (input["subject"] as? String) ?? ""
+        guard !title.isEmpty else { return }
+        seq += 1
+        list.append(TodoItem(id: String(seq), title: title,
+                             activeForm: nonEmpty(input["activeForm"]), status: .pending))
+    }
+
+    /// `TaskUpdate {taskId, status?}` merges a new status into the matching task.
+    static func applyTaskUpdate(_ input: [String: Any], into list: inout [TodoItem]) {
+        let taskId = (input["taskId"] as? String) ?? (input["taskId"] as? Int).map(String.init)
+        guard let taskId, let idx = list.firstIndex(where: { $0.id == taskId }) else { return }
+        if let s = input["status"] as? String, let status = TodoStatus(rawValue: s) {
+            list[idx].status = status
+        }
+    }
+
+    /// A non-empty `String` from a loosely-typed JSON value, else nil.
+    private static func nonEmpty(_ value: Any?) -> String? {
+        guard let s = value as? String, !s.isEmpty else { return nil }
+        return s
     }
 
     private func parseTimestamp(_ s: String?) -> Date? {

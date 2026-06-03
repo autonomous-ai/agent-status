@@ -27,6 +27,9 @@ final class Settings: ObservableObject {
     @Published var showAITitleAndLastPrompt: Bool {
         didSet { defaults.set(showAITitleAndLastPrompt, forKey: Keys.showAITitleAndLastPrompt) }
     }
+    @Published var showTaskList: Bool {
+        didSet { defaults.set(showTaskList, forKey: Keys.showTaskList) }
+    }
 
     // Notifications (each toggle independently)
     @Published var notifyWaiting: Bool {
@@ -50,6 +53,7 @@ final class Settings: ObservableObject {
             Keys.showPermissionMode:        true,
             Keys.showTokensAndCost:         true,
             Keys.showAITitleAndLastPrompt:  true,
+            Keys.showTaskList:              true,
             Keys.notifyWaiting:             true,
             Keys.notifyToolError:           true,
             Keys.notifyCompletion:          false  // off by default — chatty
@@ -60,6 +64,7 @@ final class Settings: ObservableObject {
         self.showPermissionMode            = defaults.bool(forKey: Keys.showPermissionMode)
         self.showTokensAndCost             = defaults.bool(forKey: Keys.showTokensAndCost)
         self.showAITitleAndLastPrompt      = defaults.bool(forKey: Keys.showAITitleAndLastPrompt)
+        self.showTaskList                  = defaults.bool(forKey: Keys.showTaskList)
         self.notifyWaiting                 = defaults.bool(forKey: Keys.notifyWaiting)
         self.notifyToolError               = defaults.bool(forKey: Keys.notifyToolError)
         self.notifyCompletion              = defaults.bool(forKey: Keys.notifyCompletion)
@@ -72,6 +77,7 @@ final class Settings: ObservableObject {
         static let showPermissionMode        = "showPermissionMode"
         static let showTokensAndCost         = "showTokensAndCost"
         static let showAITitleAndLastPrompt  = "showAITitleAndLastPrompt"
+        static let showTaskList              = "showTaskList"
         static let notifyWaiting             = "notifyWaiting"
         static let notifyToolError           = "notifyToolError"
         static let notifyCompletion          = "notifyCompletion"

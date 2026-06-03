@@ -17,6 +17,7 @@ struct SettingsView: View {
                     Toggle("Permission mode badge", isOn: $settings.showPermissionMode)
                     Toggle("Tokens & estimated cost", isOn: $settings.showTokensAndCost)
                     Toggle("AI title & last prompt", isOn: $settings.showAITitleAndLastPrompt)
+                    Toggle("Task list", isOn: $settings.showTaskList)
                 }
 
                 Divider()
