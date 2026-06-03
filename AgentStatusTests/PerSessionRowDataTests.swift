@@ -32,6 +32,33 @@ final class PerSessionRowDataTests: XCTestCase {
         XCTAssertEqual(r.title, "foo")
     }
 
+    func testTitleForUUIDFolderUsesLastUserPrompt() {
+        // SDK-style sessions run in `.../projects/<uuid>`, so the cwd basename is
+        // a bare UUID — fall back to the (truncated) last user prompt instead.
+        var e = EnrichedSession.empty
+        e.lastUserPrompt = "  I want a phone stand on desk with magsafe charger  "
+        let cwd = URL(fileURLWithPath: "/Users/dee/Library/Application Support/app.Panda.Panda/projects/625f5183-45e0-4c25-8761-dffc40ae9978")
+        let snap = makeSnap(cwd: cwd, enriched: e)
+        let r = PerSessionStatusItem.rowData(from: snap, now: t0)
+        XCTAssertEqual(r.title, "I want a phone stand on desk with magsafe charger")
+    }
+
+    func testTitleForUUIDFolderWithoutPromptKeepsUUID() {
+        // No prompt observed yet → last resort is the UUID itself.
+        let uuid = "625f5183-45e0-4c25-8761-dffc40ae9978"
+        let snap = makeSnap(cwd: URL(fileURLWithPath: "/x/projects/\(uuid)"))
+        let r = PerSessionStatusItem.rowData(from: snap, now: t0)
+        XCTAssertEqual(r.title, uuid)
+    }
+
+    func testTitleForUUIDFolderTruncatesLongPrompt() {
+        var e = EnrichedSession.empty
+        e.lastUserPrompt = String(repeating: "a", count: 200)
+        let snap = makeSnap(cwd: URL(fileURLWithPath: "/x/projects/625f5183-45e0-4c25-8761-dffc40ae9978"), enriched: e)
+        let r = PerSessionStatusItem.rowData(from: snap, now: t0)
+        XCTAssertEqual(r.title.count, 60)
+    }
+
     // MARK: - Bottom suffix grammar
 
     func testIdleBottomIsEmpty() {

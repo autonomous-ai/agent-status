@@ -79,7 +79,7 @@ struct SessionDetailView: View {
         if settings.showAITitleAndLastPrompt, let t = s.enriched?.aiTitle, !t.isEmpty {
             return t
         }
-        return s.cwdBasename
+        return s.fallbackTitle
     }
 
     @ViewBuilder

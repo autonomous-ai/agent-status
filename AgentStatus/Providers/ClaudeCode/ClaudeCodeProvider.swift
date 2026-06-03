@@ -121,9 +121,28 @@ actor ClaudeCodeProvider: SessionProvider {
         let merged = lastScan.map { snap -> SessionSnapshot in
             var copy = snap
             copy.enriched = enrichedCache[snap.sessionId]
+            copy.status = Self.resolveStatus(coarse: snap.status, enriched: copy.enriched)
             return copy
         }
         streamContinuation?.yield(merged)
+    }
+
+    /// Some Claude embeddings (e.g. the Agent SDK) write sessions with a null
+    /// `status`, which decodes to `.unknown("unknown")`. When that happens, infer
+    /// a status from the rich transcript state instead of surfacing a bare "unknown".
+    /// Never overrides a recognized status, nor a genuinely *named* future status.
+    nonisolated static func resolveStatus(coarse: SessionStatus, enriched: EnrichedSession?) -> SessionStatus {
+        guard case .unknown(let raw) = coarse,
+              raw.isEmpty || raw.caseInsensitiveCompare("unknown") == .orderedSame,
+              let e = enriched
+        else { return coarse }
+        if !e.activeTools.isEmpty || e.currentTool != nil || e.lastStopReason == "tool_use" {
+            return .busy
+        }
+        if e.assistantTurns > 0 || !e.recentTools.isEmpty {
+            return .idle
+        }
+        return coarse   // transcript opened but no signal yet → leave as-is
     }
 
     /// Pure scan: enumerates the directory, decodes each JSON, applies liveness, sorts.
