@@ -259,6 +259,57 @@ final class PerSessionRowDataTests: XCTestCase {
         XCTAssertEqual(r.bottom, "")
     }
 
+    // MARK: - Task progress bottom line
+
+    private func todo(_ id: String, _ title: String, _ status: TodoStatus, activeForm: String? = nil) -> TodoItem {
+        TodoItem(id: id, title: title, activeForm: activeForm, status: status)
+    }
+
+    func testTaskLineShownForIdleWhenInProgress() {
+        var e = EnrichedSession.empty
+        e.todos = [
+            todo("1", "A1 done", .completed),
+            todo("2", "A2 work", .inProgress, activeForm: "Working on A2"),
+            todo("3", "A3 next", .pending),
+        ]
+        let snap = makeSnap(status: .idle, enriched: e)
+        let r = PerSessionStatusItem.rowData(from: snap, now: t0, showTasks: true)
+        XCTAssertEqual(r.bottom, "▸ Working on A2 · 1/3")
+    }
+
+    func testTaskLineHiddenWhenShowTasksOff() {
+        var e = EnrichedSession.empty
+        e.todos = [todo("1", "x", .inProgress)]
+        let snap = makeSnap(status: .idle, enriched: e)
+        let r = PerSessionStatusItem.rowData(from: snap, now: t0, showTasks: false)
+        XCTAssertEqual(r.bottom, "")
+    }
+
+    func testActiveToolTakesPriorityOverTaskLine() {
+        var e = EnrichedSession.empty
+        e.todos = [todo("1", "task", .inProgress)]
+        e.activeTools = [active(id: "1", name: "Bash", preview: "npm test", startedAt: t0.addingTimeInterval(-10))]
+        let snap = makeSnap(status: .busy, enriched: e)
+        let r = PerSessionStatusItem.rowData(from: snap, now: t0, showTasks: true)
+        XCTAssertEqual(r.bottom, "Bash npm test")
+    }
+
+    func testTaskLineFallsBackToPendingWhenNoneInProgress() {
+        var e = EnrichedSession.empty
+        e.todos = [todo("1", "A1", .completed), todo("2", "A2 pending", .pending)]
+        let snap = makeSnap(status: .idle, enriched: e)
+        let r = PerSessionStatusItem.rowData(from: snap, now: t0, showTasks: true)
+        XCTAssertEqual(r.bottom, "▸ A2 pending · 1/2")
+    }
+
+    func testTaskLineAllDone() {
+        var e = EnrichedSession.empty
+        e.todos = [todo("1", "A1", .completed), todo("2", "A2", .completed)]
+        let snap = makeSnap(status: .idle, enriched: e)
+        let r = PerSessionStatusItem.rowData(from: snap, now: t0, showTasks: true)
+        XCTAssertEqual(r.bottom, "2/2 done")
+    }
+
     // MARK: - Error pip window
 
     func testHasRecentErrorFalseWhenAllCleanInLastFive() {

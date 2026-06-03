@@ -148,6 +148,13 @@ struct SessionRow: View {
         if settings.showAITitleAndLastPrompt, let model = e.currentModel {
             out.append(Chip(text: shortModel(model), color: .purple))
         }
+        if settings.showTaskList {
+            let live = e.todos.filter { $0.status != .deleted }
+            if !live.isEmpty {
+                let done = live.filter { $0.status == .completed }.count
+                out.append(Chip(text: "✓ \(done)/\(live.count)", color: .blue))
+            }
+        }
         return out
     }
 

@@ -26,7 +26,11 @@ struct SessionDetailView: View {
                         Divider()
                     }
                     runningNowSection(for: s)
-                    recentToolsSection(for: s)
+                    if settings.showTaskList, let todos = s.enriched?.todos, !todos.isEmpty {
+                        todosSection(todos)
+                    } else {
+                        recentToolsSection(for: s)
+                    }
                     sparkline(for: s)
                     Divider()
                     if settings.showTokensAndCost, let tokens = s.enriched?.tokens, tokens.grandTotal > 0 {
@@ -271,6 +275,61 @@ struct SessionDetailView: View {
         if d < 60 { return String(format: "%.1fs", d) }
         let m = Int(d) / 60, s = Int(d) % 60
         return "\(m)m\(s)s"
+    }
+
+    // MARK: - Task list
+
+    @ViewBuilder
+    private func todosSection(_ todos: [TodoItem]) -> some View {
+        let rows = TodoDisplay.rows(from: todos)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Tasks (\(rows.completedCount)/\(rows.totalCount))")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(rows.visible, id: \.id) { todoRow($0) }
+                if rows.hiddenCompletedCount > 0 {
+                    Text("… +\(rows.hiddenCompletedCount) completed")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 18)
+                }
+            }
+        }
+    }
+
+    private func todoRow(_ item: TodoItem) -> some View {
+        let done = item.status == .completed
+        let inProgress = item.status == .inProgress
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: todoSymbol(item.status))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(todoColor(item.status))
+                .frame(width: 12, alignment: .center)
+            Text(inProgress ? (item.activeForm ?? item.title) : item.title)
+                .font(.system(size: 11, weight: inProgress ? .semibold : .regular))
+                .foregroundStyle(done ? .secondary : .primary)
+                .strikethrough(done, color: .secondary)
+                .lineLimit(2)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func todoSymbol(_ status: TodoStatus) -> String {
+        switch status {
+        case .inProgress: "circle.lefthalf.filled"
+        case .completed:  "checkmark.square.fill"
+        default:          "square"          // pending (and any future state)
+        }
+    }
+
+    private func todoColor(_ status: TodoStatus) -> Color {
+        switch status {
+        case .inProgress: .blue
+        case .completed:  .green
+        default:          .secondary
+        }
     }
 
     private func sparkline(for s: SessionSnapshot) -> some View {

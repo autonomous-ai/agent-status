@@ -36,7 +36,7 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
         self.popover.contentSize = NSSize(width: 320, height: 260)
         // contentViewController stays nil until popover opens — see togglePopover().
 
-        self.lastRowData = Self.rowData(from: initialSnapshot, now: Date())
+        self.lastRowData = Self.rowData(from: initialSnapshot, now: Date(), showTasks: settings.showTaskList)
 
         super.init()
 
@@ -67,7 +67,7 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
         // Always refresh tooltip — cheap, no view-tree mutation.
         item.button?.toolTip = Self.tooltip(for: snapshot)
 
-        let next = Self.rowData(from: snapshot, now: Date())
+        let next = Self.rowData(from: snapshot, now: Date(), showTasks: settings.showTaskList)
         if next == lastRowData { return }
 
         lastRowData = next
@@ -123,7 +123,7 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
     /// elapsed-time anchor (production passes `Date()`; tests pass a pinned
     /// date). All formatting decisions live here so the redraw gate can
     /// short-circuit on equality alone.
-    static func rowData(from snap: SessionSnapshot, now: Date) -> RowData {
+    static func rowData(from snap: SessionSnapshot, now: Date, showTasks: Bool = false) -> RowData {
         let title: String
         if let t = snap.enriched?.aiTitle, !t.isEmpty {
             title = t
@@ -131,7 +131,7 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
             title = snap.fallbackTitle
         }
 
-        let bottom = bottomText(for: snap, now: now)
+        let bottom = bottomText(for: snap, now: now, showTasks: showTasks)
 
         let recent = snap.enriched?.recentTools ?? []
         let hasRecentError = recent.prefix(5).contains { $0.isError }
@@ -159,7 +159,7 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
     /// its job alone.
     ///
     /// Truncation of long strings happens at render time.
-    private static func bottomText(for snap: SessionSnapshot, now: Date) -> String {
+    private static func bottomText(for snap: SessionSnapshot, now: Date, showTasks: Bool) -> String {
         // Waiting overrides everything else — most action-required.
         if snap.status == .waiting {
             // .last is the pending tool when waiting: activeTools is sorted
@@ -201,10 +201,27 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
         }
 
         // Status-word-only states (idle, busy-without-active, stopped, paused,
-        // error, running, unknown) → empty. The icon carries the status; the
-        // bottom row only fills with content when there's something extra
-        // worth saying beyond "the session has this status."
-        return ""
+        // error, running, unknown) → normally empty (the icon carries the
+        // status). When the session has a task list, fill that otherwise-empty
+        // row with task progress instead — more useful than blank space.
+        return showTasks ? taskLine(for: snap) : ""
+    }
+
+    /// Compact task-progress line for the menu-bar bottom row: the in-progress
+    /// (or next pending) task plus a `done/total` count. Empty when there are no
+    /// tasks. Pure.
+    static func taskLine(for snap: SessionSnapshot) -> String {
+        let live = (snap.enriched?.todos ?? []).filter { $0.status != .deleted }
+        guard !live.isEmpty else { return "" }
+        let done = live.filter { $0.status == .completed }.count
+        let count = "\(done)/\(live.count)"
+        if let ip = live.first(where: { $0.status == .inProgress }) {
+            return "▸ \(ip.activeForm ?? ip.title) · \(count)"
+        }
+        if let next = live.first(where: { $0.status == .pending }) {
+            return "▸ \(next.title) · \(count)"
+        }
+        return "\(count) done"
     }
 
     /// Build a multi-line tooltip from a snapshot. Pure — no side effects.
