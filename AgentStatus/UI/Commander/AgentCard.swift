@@ -29,6 +29,7 @@ struct AgentCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            autonomyRow
             heroAction
             infoRow
             Spacer(minLength: 0)
@@ -222,6 +223,41 @@ struct AgentCard: View {
     private var visibleMode: String? {
         guard let m = model.permissionMode, m != "default" else { return nil }
         return m
+    }
+
+    /// Autonomy banner: surfaces an active `/goal` and/or `/loop`. These read as
+    /// "this session is running itself" — an idle-looking goal/loop session is
+    /// NOT done, so this sits high on the card where it can't be missed.
+    @ViewBuilder
+    private var autonomyRow: some View {
+        if model.goal != nil || model.loop != nil {
+            HStack(spacing: 8) {
+                if let goal = model.goal {
+                    autonomyChip(icon: "target", label: goal, tint: .pink)
+                }
+                if let loop = model.loop {
+                    autonomyChip(icon: "repeat", label: loop, tint: .teal)
+                        .layoutPriority(model.goal == nil ? 1 : 0)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private func autonomyChip(icon: String, label: String, tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .bold))
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .foregroundStyle(model.dim ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(tint.opacity(model.dim ? 0.06 : 0.14), in: Capsule())
+        .overlay(Capsule().strokeBorder(tint.opacity(model.dim ? 0.15 : 0.35), lineWidth: 1))
     }
 
     @ViewBuilder

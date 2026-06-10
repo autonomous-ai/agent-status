@@ -55,4 +55,18 @@ final class EnrichedSessionCoreEqualTests: XCTestCase {
         b.gitBranch = "feature/x"
         XCTAssertFalse(a.coreEqual(b))
     }
+
+    func testCoreEqualNoticesGoalConditionChange() {
+        let a = EnrichedSession.empty
+        var b = EnrichedSession.empty
+        b.goalCondition = "ship it"
+        XCTAssertFalse(a.coreEqual(b))
+    }
+
+    func testCoreEqualNoticesLoopTargetChange() {
+        let a = EnrichedSession.empty
+        var b = EnrichedSession.empty
+        b.loopTarget = "5m /babysit"
+        XCTAssertFalse(a.coreEqual(b))
+    }
 }

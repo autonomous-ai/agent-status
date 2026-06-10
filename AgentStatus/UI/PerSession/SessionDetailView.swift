@@ -21,6 +21,10 @@ struct SessionDetailView: View {
                 if let s = snap {
                     header(for: s, now: now)
                     Divider()
+                    if s.enriched?.goalCondition != nil || s.enriched?.loopTarget != nil {
+                        autonomySection(for: s)
+                        Divider()
+                    }
                     if s.status == .waiting {
                         waitingSection(for: s)
                         Divider()
@@ -75,6 +79,39 @@ struct SessionDetailView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+            }
+        }
+    }
+
+    /// Goal / loop banner. A session under a `/goal` or in a `/loop` is running
+    /// itself toward a condition — the most important context for "is this
+    /// session actually done?", so it sits right under the header.
+    @ViewBuilder
+    private func autonomySection(for s: SessionSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let goal = s.enriched?.goalCondition {
+                autonomyRow(glyph: "target", title: "Goal", text: goal, tint: .pink)
+            }
+            if let loop = s.enriched?.loopTarget {
+                autonomyRow(glyph: "repeat", title: "Loop", text: loop, tint: .teal)
+            }
+        }
+    }
+
+    private func autonomyRow(glyph: String, title: String, text: String, tint: Color) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: glyph)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 14)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title.uppercased())
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

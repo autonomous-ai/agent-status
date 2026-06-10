@@ -56,6 +56,10 @@ struct AgentCardModel: Equatable {
     let contextLimit: Int         // model's context window
     let idleFor: String           // how long a resting session has been idle; "" if <1m or not resting
 
+    // Autonomy
+    let goal: String?             // active /goal condition the session is working toward; nil if none
+    let loop: String?             // best-effort /loop target ("5m /foo" / "self-paced"); nil if not looping
+
     var hasTasks: Bool { tasksTotal > 0 }
     var taskFraction: Double { tasksTotal == 0 ? 0 : Double(tasksCompleted) / Double(tasksTotal) }
     var contextFraction: Double {
@@ -129,7 +133,9 @@ struct AgentCardModel: Equatable {
             branch: e?.gitBranch,
             contextTokens: e?.contextTokens ?? 0,
             contextLimit: ContextWindow.limit(for: e?.currentModel),
-            idleFor: idleFor
+            idleFor: idleFor,
+            goal: e?.goalCondition,
+            loop: e?.loopTarget
         )
     }
 

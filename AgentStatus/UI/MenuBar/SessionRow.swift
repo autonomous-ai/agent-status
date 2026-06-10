@@ -33,6 +33,7 @@ struct SessionRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 titleRow(model)
                 secondaryLine(model)
+                autonomyLine(model)
                 metaChips(model)
                 SparklineView(buckets: buckets, height: 12)
                     .frame(maxWidth: .infinity)
@@ -148,6 +149,37 @@ struct SessionRow: View {
             text += " · \(model.idleFor)"
         }
         return text
+    }
+
+    // MARK: - Autonomy line (goal / loop)
+
+    /// A session under a `/goal` or in a `/loop` is running itself — flag it so an
+    /// idle-looking autonomous session isn't misread as finished.
+    @ViewBuilder
+    private func autonomyLine(_ model: AgentCardModel) -> some View {
+        if model.goal != nil || model.loop != nil {
+            HStack(spacing: 6) {
+                if let goal = model.goal {
+                    autonomyTag(glyph: "target", text: goal, color: .pink)
+                }
+                if let loop = model.loop {
+                    autonomyTag(glyph: "repeat", text: loop, color: .teal)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private func autonomyTag(glyph: String, text: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: glyph)
+                .font(.system(size: 9, weight: .bold))
+            Text(text)
+                .font(.system(size: 10, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .foregroundStyle(color)
     }
 
     // MARK: - Meta chips

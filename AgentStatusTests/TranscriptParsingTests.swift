@@ -406,6 +406,62 @@ final class TranscriptParsingTests: XCTestCase {
         XCTAssertEqual(snap.gitBranch, "main", "empty branch (detached/none) must not clobber")
     }
 
+    // MARK: - Goal & loop detection
+
+    private func userTextJSON(_ text: String) -> [String: Any] {
+        ["type": "user", "message": ["role": "user", "content": text]]
+    }
+
+    func testGoalSetFromStdout() async {
+        let tailer = TranscriptTailer(sessionId: "goal1", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString(userTextJSON(
+            "<local-command-stdout>Goal set: ship the thing</local-command-stdout>")))
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.goalCondition, "ship the thing")
+    }
+
+    func testGoalSetFromStopHookMeta() async {
+        let tailer = TranscriptTailer(sessionId: "goal2", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString(userTextJSON(
+            "A session-scoped Stop hook is now active with condition: \"make tests pass\". Briefly acknowledge.")))
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.goalCondition, "make tests pass")
+    }
+
+    func testGoalClearViaCommand() async {
+        let tailer = TranscriptTailer(sessionId: "goal3", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString(userTextJSON(
+            "<local-command-stdout>Goal set: ship the thing</local-command-stdout>")))
+        await tailer._test_processLine(jsonString(userTextJSON(
+            "<command-name>/goal</command-name>\n<command-message>goal</command-message>\n<command-args>clear</command-args>")))
+        let snap = await tailer._test_state
+        XCTAssertNil(snap.goalCondition, "/goal clear must reset the goal")
+    }
+
+    func testNonGoalStdoutDoesNotSetGoal() async {
+        let tailer = TranscriptTailer(sessionId: "goal4", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString(userTextJSON(
+            "<local-command-stdout>Usage: 1234 tokens</local-command-stdout>")))
+        let snap = await tailer._test_state
+        XCTAssertNil(snap.goalCondition)
+    }
+
+    func testLoopDetectedFromCommand() async {
+        let tailer = TranscriptTailer(sessionId: "loop1", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString(userTextJSON(
+            "<command-name>/loop</command-name>\n<command-message>loop</command-message>\n<command-args>5m /babysit-prs</command-args>")))
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.loopTarget, "5m /babysit-prs")
+    }
+
+    func testLoopSelfPacedWhenNoArgs() async {
+        let tailer = TranscriptTailer(sessionId: "loop2", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString(userTextJSON(
+            "<command-name>/loop</command-name>\n<command-message>loop</command-message>\n<command-args></command-args>")))
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.loopTarget, "self-paced")
+    }
+
     // MARK: - Test helpers
 
     private func makeAssistantToolUseJSON(toolUseId: String, name: String, isSidechain: Bool) -> [String: Any] {

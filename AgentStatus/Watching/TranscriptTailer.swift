@@ -281,6 +281,7 @@ actor TranscriptTailer {
 
         if let text = content as? String, !text.isEmpty {
             state.lastUserPrompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            applyGoalAndLoopSignals(text)
             return
         }
         if let blocks = content as? [[String: Any]] {
@@ -316,10 +317,73 @@ actor TranscriptTailer {
                 return nil
             }
             if !textBits.isEmpty {
-                state.lastUserPrompt = textBits.joined(separator: "\n")
+                let joined = textBits.joined(separator: "\n")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
+                state.lastUserPrompt = joined
+                applyGoalAndLoopSignals(joined)
             }
         }
+    }
+
+    /// Fold a user message's text into the goal/loop state. Cheap `contains`
+    /// guards run first so the common (no-signal) case stays nearly free on the
+    /// hot path; extraction only runs when a marker is present.
+    private func applyGoalAndLoopSignals(_ text: String) {
+        if Self.isGoalClear(in: text) {
+            state.goalCondition = nil
+        } else if let condition = Self.goalCondition(in: text) {
+            state.goalCondition = condition
+        }
+        if let target = Self.loopTarget(in: text) {
+            state.loopTarget = target
+        }
+    }
+
+    /// Extract an active goal condition from a user message, or nil. Recognizes
+    /// the `/goal` command stdout (`Goal set: <condition>`) and the stop-hook
+    /// meta message (`…condition: "<condition>"`).
+    static func goalCondition(in text: String) -> String? {
+        if let c = substring(in: text, after: "Goal set:", upTo: "</local-command-stdout>") {
+            return c
+        }
+        if let c = substring(in: text, after: "Stop hook is now active with condition: \"", upTo: "\"") {
+            return c
+        }
+        return nil
+    }
+
+    /// True when the message clears a goal: a `/goal clear` invocation or a
+    /// `Goal cleared` stdout (defensive — the exact clear stdout is unconfirmed).
+    static func isGoalClear(in text: String) -> Bool {
+        if text.contains("Goal cleared") { return true }
+        if text.contains("<command-name>/goal</command-name>"),
+           commandArgs(in: text)?.lowercased() == "clear" {
+            return true
+        }
+        return false
+    }
+
+    /// Best-effort `/loop` target: the command's args, or "self-paced" when the
+    /// interval is omitted. Nil when this isn't a `/loop` invocation.
+    static func loopTarget(in text: String) -> String? {
+        guard text.contains("<command-name>/loop</command-name>") else { return nil }
+        let args = commandArgs(in: text)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return args.isEmpty ? "self-paced" : args
+    }
+
+    /// Pull the trimmed contents of a `<command-args>…</command-args>` block.
+    static func commandArgs(in text: String) -> String? {
+        substring(in: text, after: "<command-args>", upTo: "</command-args>")
+    }
+
+    /// Return the trimmed text between `marker` and the next `terminator` after
+    /// it, or nil if either isn't found. Empty results collapse to nil.
+    private static func substring(in text: String, after marker: String, upTo terminator: String) -> String? {
+        guard let markerRange = text.range(of: marker) else { return nil }
+        let tail = text[markerRange.upperBound...]
+        let end = tail.range(of: terminator)?.lowerBound ?? tail.endIndex
+        let result = tail[..<end].trimmingCharacters(in: .whitespacesAndNewlines)
+        return result.isEmpty ? nil : result
     }
 
     private func handleAssistantMessage(_ json: [String: Any]) {

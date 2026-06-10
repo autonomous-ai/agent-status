@@ -41,6 +41,20 @@ struct EnrichedSession: Hashable, Sendable {
     /// Total tool invocations (count of tool_use across all assistant messages).
     var toolCalls: Int = 0
 
+    /// Active `/goal` condition — the text the session is autonomously working
+    /// toward under a Stop hook. Set from the `Goal set: …` command stdout (or
+    /// the stop-hook meta message); cleared by `/goal clear`. `nil` when no goal
+    /// is set. NOTE: a goal that auto-clears on completion leaves no on-disk
+    /// trace, so this can read stale until the session ends — surfaced honestly
+    /// as "put under a goal", never used to reclassify status.
+    var goalCondition: String? = nil
+
+    /// Best-effort `/loop` target — set when the session was put into `/loop`
+    /// mode, carrying the loop's args (e.g. "5m /babysit") or "self-paced" when
+    /// the interval is omitted. `nil` when not looping. Loop *stop* is not
+    /// reliably detectable on disk, so this clears only on session end.
+    var loopTarget: String? = nil
+
     /// All in-flight top-level tool calls, ordered by `startedAt` ascending.
     /// Sidechain (sub-agent internal) tool calls are filtered out at ingestion.
     var activeTools: [ActiveTool] = []
@@ -73,6 +87,8 @@ struct EnrichedSession: Hashable, Sendable {
             && errorCount == other.errorCount
             && assistantTurns == other.assistantTurns
             && toolCalls == other.toolCalls
+            && goalCondition == other.goalCondition
+            && loopTarget == other.loopTarget
             && currentTool == other.currentTool
             && activeTools == other.activeTools
             && recentTools == other.recentTools

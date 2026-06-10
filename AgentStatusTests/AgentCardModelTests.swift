@@ -66,6 +66,32 @@ final class AgentCardModelTests: XCTestCase {
         XCTAssertLessThan(CommanderGroup.idle.rawValue, CommanderGroup.ended.rawValue)
     }
 
+    // MARK: - Goal & loop
+
+    func testGoalConditionSurfaced() {
+        var e = EnrichedSession.empty
+        e.goalCondition = "make tests pass"
+        let m = AgentCardModel.make(from: makeSnap(enriched: e), now: t0)
+        XCTAssertEqual(m.goal, "make tests pass")
+    }
+
+    func testNoGoalIsNil() {
+        let m = AgentCardModel.make(from: makeSnap(), now: t0)
+        XCTAssertNil(m.goal)
+    }
+
+    func testLoopTargetSurfaced() {
+        var e = EnrichedSession.empty
+        e.loopTarget = "5m /babysit"
+        let m = AgentCardModel.make(from: makeSnap(enriched: e), now: t0)
+        XCTAssertEqual(m.loop, "5m /babysit")
+    }
+
+    func testNoLoopIsNil() {
+        let m = AgentCardModel.make(from: makeSnap(), now: t0)
+        XCTAssertNil(m.loop)
+    }
+
     // MARK: - Activity line
 
     func testIdleHasNoActivity() {
