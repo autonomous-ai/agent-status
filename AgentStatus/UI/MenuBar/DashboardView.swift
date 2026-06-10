@@ -17,18 +17,24 @@ struct DashboardView: View {
             if store.snapshots.isEmpty {
                 emptyState.padding(.vertical, 24)
             } else {
-                ScrollView(showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(store.snapshots) { snap in
-                            SessionRow(snapshot: snap, buckets: buckets(for: snap.id))
-                                .background(Color.clear)
-                            if snap.id != store.snapshots.last?.id {
-                                Divider().padding(.leading, 44)
+                // One shared 1 Hz tick drives every row's live-tool elapsed and
+                // idle/uptime counters — no per-row timers (matches Commander).
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    ScrollView(showsIndicators: false) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(store.snapshots) { snap in
+                                SessionRow(snapshot: snap,
+                                           model: AgentCardModel.make(from: snap, now: ctx.date),
+                                           buckets: buckets(for: snap.id))
+                                    .background(Color.clear)
+                                if snap.id != store.snapshots.last?.id {
+                                    Divider().padding(.leading, 44)
+                                }
                             }
                         }
                     }
+                    .frame(maxHeight: 360)
                 }
-                .frame(maxHeight: 360)
             }
 
             Divider()
@@ -48,9 +54,19 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Agent Status")
                     .font(.headline)
-                Text(headerSubtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(headerSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let spend = aggregateSpend {
+                        Text("·").font(.caption).foregroundStyle(.tertiary)
+                        Label(spend, systemImage: "dollarsign.circle")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(.green)
+                            .labelStyle(.titleAndIcon)
+                            .monospacedDigit()
+                    }
+                }
             }
             Spacer()
             statusCounts
@@ -63,6 +79,15 @@ struct DashboardView: View {
         if live == 0 { return "No live sessions" }
         if live == 1 { return "1 live session" }
         return "\(live) live sessions"
+    }
+
+    /// Total estimated USD across all live sessions — the "how much am I burning
+    /// right now" number, mirroring the Commander ribbon. Nil when zero.
+    private var aggregateSpend: String? {
+        let usd = store.snapshots
+            .filter { $0.isAlive }
+            .reduce(0.0) { $0 + ($1.enriched?.estimatedCost ?? 0) }
+        return usd > 0 ? usd.asUSD : nil
     }
 
     @ViewBuilder

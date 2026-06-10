@@ -355,6 +355,32 @@ struct SessionDetailView: View {
                 Text(e.estimatedCost.asUSD)
                     .font(.system(.subheadline, design: .monospaced).weight(.semibold))
             }
+            if e.contextTokens > 0 { contextGauge(e) }
+        }
+    }
+
+    /// Live context-window fill — the "how close to auto-compaction" gauge.
+    @ViewBuilder
+    private func contextGauge(_ e: EnrichedSession) -> some View {
+        let limit = ContextWindow.limit(for: e.currentModel)
+        let frac = limit == 0 ? 0 : min(1.0, Double(e.contextTokens) / Double(limit))
+        let tint: Color = frac > 0.85 ? .red : (frac > 0.6 ? .orange : .cyan)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text("context").font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary)
+                Spacer()
+                Text("\(TokenUsage.compact(e.contextTokens)) / \(TokenUsage.compact(limit)) · \(Int((frac * 100).rounded()))%")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.18))
+                    Capsule().fill(tint).frame(width: max(2, geo.size.width * frac))
+                }
+            }
+            .frame(height: 4)
         }
     }
 
@@ -385,11 +411,13 @@ struct SessionDetailView: View {
     private func metadata(for s: SessionSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             row("path", s.cwd.path, monospaced: true)
+            if let b = s.enriched?.gitBranch { row("branch", b, monospaced: true) }
             if let w = s.waitingFor { row("waiting", w) }
             if settings.showPermissionMode, let m = s.enriched?.permissionMode { row("mode", m) }
             if let n = s.enriched?.subagentName { row("agent", n) }
             if let v = s.version { row("version", v) }
             if let k = s.kind    { row("kind", k) }
+            if let e = s.enriched, e.assistantTurns > 0 { row("turns", "\(e.assistantTurns)") }
             if let e = s.enriched, e.toolCalls > 0 {
                 row("tools", "\(e.toolCalls) calls\(e.errorCount > 0 ? " · \(e.errorCount) errors" : "")")
             }
