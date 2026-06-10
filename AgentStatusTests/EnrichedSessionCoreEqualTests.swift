@@ -41,4 +41,18 @@ final class EnrichedSessionCoreEqualTests: XCTestCase {
         b.permissionMode = "plan"
         XCTAssertFalse(a.coreEqual(b))
     }
+
+    func testCoreEqualNoticesContextTokensChange() {
+        let a = EnrichedSession.empty
+        var b = EnrichedSession.empty
+        b.contextTokens = 120_000
+        XCTAssertFalse(a.coreEqual(b))
+    }
+
+    func testCoreEqualNoticesGitBranchChange() {
+        let a = EnrichedSession.empty
+        var b = EnrichedSession.empty
+        b.gitBranch = "feature/x"
+        XCTAssertFalse(a.coreEqual(b))
+    }
 }

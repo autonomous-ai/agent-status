@@ -215,6 +215,9 @@ struct CommanderDetailStrip: View {
                         Text(e.estimatedCost.asUSD)
                             .font(.system(.subheadline, design: .monospaced).weight(.semibold))
                     }
+                    if e.contextTokens > 0 {
+                        contextRow(e)
+                    }
                 }
             }
             if settings.showAITitleAndLastPrompt {
@@ -226,6 +229,26 @@ struct CommanderDetailStrip: View {
                 }
             }
         }
+    }
+
+    /// Live context-window fill — exact numbers here, where there's room
+    /// (the card carries the compact % gauge).
+    private func contextRow(_ e: EnrichedSession) -> some View {
+        let limit = ContextWindow.limit(for: e.currentModel)
+        let frac = limit == 0 ? 0 : min(1.0, Double(e.contextTokens) / Double(limit))
+        let tint: Color = frac > 0.85 ? .red : (frac > 0.6 ? .orange : .cyan)
+        return HStack(spacing: 8) {
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.12))
+                Capsule().fill(tint).frame(width: max(2, 120 * frac))
+            }
+            .frame(width: 120, height: 4)
+            Text("context \(TokenUsage.compact(e.contextTokens)) / \(TokenUsage.compact(limit)) · \(Int((frac * 100).rounded()))%")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .padding(.top, 2)
     }
 
     private func tokenStat(_ label: String, _ n: Int) -> some View {
@@ -247,9 +270,13 @@ struct CommanderDetailStrip: View {
     private func metadataAndActions(for s: SessionSnapshot) -> some View {
         HStack(alignment: .center, spacing: 14) {
             metaItem("path", s.cwd.path, mono: true)
+            if let b = s.enriched?.gitBranch { metaItem("branch", b, mono: true) }
             if let v = s.version { metaItem("version", v) }
             if let k = s.kind { metaItem("kind", k) }
             metaItem("pid", "\(s.pid)", mono: true)
+            if let e = s.enriched, e.assistantTurns > 0 {
+                metaItem("turns", "\(e.assistantTurns)")
+            }
             if let e = s.enriched, e.toolCalls > 0 {
                 metaItem("tools", "\(e.toolCalls)\(e.errorCount > 0 ? " · \(e.errorCount) err" : "")")
             }

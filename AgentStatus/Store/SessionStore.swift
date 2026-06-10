@@ -110,6 +110,12 @@ final class SessionStore: ObservableObject {
         uiEqual(a, b)
     }
 
+    /// Test-only hook: inject snapshots directly (bypassing providers) so
+    /// view-render tests can drive store-backed views without file I/O.
+    func _test_ingest(providerId: String, snapshots: [SessionSnapshot]) {
+        ingest(providerId: providerId, snapshots: snapshots)
+    }
+
     private func recompute() {
         let union = perProvider.values.flatMap { $0 }
         // Sort: alive first, then by startedAt ascending.

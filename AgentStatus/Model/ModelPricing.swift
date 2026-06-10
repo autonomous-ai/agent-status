@@ -43,6 +43,15 @@ struct ModelPricing: Sendable {
     }
 }
 
+/// Context-window size per model id. Claude models are 200k unless the id
+/// carries the long-context marker (e.g. "claude-sonnet-4-6[1m]").
+enum ContextWindow {
+    static func limit(for modelId: String?) -> Int {
+        guard let m = modelId?.lowercased() else { return 200_000 }
+        return m.contains("[1m]") ? 1_000_000 : 200_000
+    }
+}
+
 extension Double {
     /// "$0.42" / "$1.23" / "$15.00".
     var asUSD: String {
