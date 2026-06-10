@@ -231,6 +231,7 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
         var lines: [String] = []
         var headline = "\(snap.cwd.path) \u{2014} \(snap.status.displayName)"
         if let w = snap.waitingFor { headline += " \u{2014} \(w)" }
+        if let b = snap.enriched?.gitBranch { headline += " \u{2014} \(b)" }
 
         let active = snap.enriched?.activeTools ?? []
         if active.count > 1 {
