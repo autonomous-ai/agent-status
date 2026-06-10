@@ -312,6 +312,100 @@ final class TranscriptParsingTests: XCTestCase {
         XCTAssertEqual(snap.estimatedCost, 80.00, accuracy: 0.0001)
     }
 
+    // MARK: - Context window tracking
+
+    /// `contextTokens` is the size of the live context at the last top-level
+    /// assistant message — input + cache_read + cache_creation of that one call
+    /// (output isn't part of the next call's prompt yet). It replaces, never
+    /// accumulates: it's a gauge, not a meter.
+    func testContextTokensTracksLastAssistantMessage() async {
+        let tailer = TranscriptTailer(sessionId: "ctx", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString(makeUsageJSON(
+            input: 1_000, output: 500, cacheRead: 50_000, cacheCreation: 9_000)))
+        var snap = await tailer._test_state
+        XCTAssertEqual(snap.contextTokens, 60_000)
+
+        await tailer._test_processLine(jsonString(makeUsageJSON(
+            input: 2_000, output: 100, cacheRead: 100_000, cacheCreation: 0)))
+        snap = await tailer._test_state
+        XCTAssertEqual(snap.contextTokens, 102_000, "last message replaces, not accumulates")
+    }
+
+    func testAssistantMessageWithoutUsageLeavesContextTokensUnchanged() async {
+        let tailer = TranscriptTailer(sessionId: "ctx2", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString(makeUsageJSON(
+            input: 0, output: 10, cacheRead: 80_000, cacheCreation: 0)))
+        await tailer._test_processLine(jsonString([
+            "type": "assistant",
+            "message": ["model": "claude-opus-4-7",
+                        "content": [["type": "text", "text": "no usage block"]]],
+        ]))
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.contextTokens, 80_000)
+    }
+
+    // MARK: - Sidechain (subagent) usage accounting
+
+    /// Subagent API calls are real spend: their usage must accumulate into
+    /// tokens + estimatedCost (priced at the sidechain message's own model).
+    /// But they are a *different* context — they must not touch contextTokens,
+    /// assistantTurns, currentModel, or lastAssistantText.
+    func testSidechainUsageCountsTowardSpendOnly() async {
+        let tailer = TranscriptTailer(sessionId: "sc-spend", cwd: URL(fileURLWithPath: "/tmp"))
+        // Top-level opus turn: 100k output, 60k context.
+        await tailer._test_processLine(jsonString(makeUsageJSON(
+            input: 10_000, output: 100_000, cacheRead: 50_000, cacheCreation: 0)))
+        // Sidechain haiku turn: 1M output → +$5.00.
+        var sidechain = makeUsageJSON(input: 0, output: 1_000_000, cacheRead: 0, cacheCreation: 0,
+                                      model: "claude-haiku-4-5", text: "subagent prose")
+        sidechain["isSidechain"] = true
+        await tailer._test_processLine(jsonString(sidechain))
+
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.tokens.output, 1_100_000, "sidechain output is real spend")
+        // opus: 10k·$15/M + 100k·$75/M + 50k·$1.50/M = 0.15 + 7.5 + 0.075 = $7.725
+        // haiku: 1M·$5/M = $5.00
+        XCTAssertEqual(snap.estimatedCost, 12.725, accuracy: 0.0001)
+        XCTAssertEqual(snap.contextTokens, 60_000, "sidechain context is not the main thread's")
+        XCTAssertEqual(snap.assistantTurns, 1)
+        XCTAssertEqual(snap.currentModel, "claude-opus-4-7")
+        XCTAssertNotEqual(snap.lastAssistantText, "subagent prose")
+    }
+
+    // MARK: - Git branch
+
+    /// Claude Code stamps `gitBranch` on every user/assistant record; the most
+    /// recent one wins (sessions can switch branches mid-flight).
+    func testGitBranchParsedAndLastWins() async {
+        let tailer = TranscriptTailer(sessionId: "br", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString([
+            "type": "user", "gitBranch": "main",
+            "message": ["content": "hello"],
+        ]))
+        var snap = await tailer._test_state
+        XCTAssertEqual(snap.gitBranch, "main")
+
+        var assistant = makeUsageJSON(input: 0, output: 1, cacheRead: 0, cacheCreation: 0)
+        assistant["gitBranch"] = "feature/polish"
+        await tailer._test_processLine(jsonString(assistant))
+        snap = await tailer._test_state
+        XCTAssertEqual(snap.gitBranch, "feature/polish")
+    }
+
+    func testEmptyGitBranchIsIgnored() async {
+        let tailer = TranscriptTailer(sessionId: "br2", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString([
+            "type": "user", "gitBranch": "main",
+            "message": ["content": "hello"],
+        ]))
+        await tailer._test_processLine(jsonString([
+            "type": "user", "gitBranch": "",
+            "message": ["content": "again"],
+        ]))
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.gitBranch, "main", "empty branch (detached/none) must not clobber")
+    }
+
     // MARK: - Test helpers
 
     private func makeAssistantToolUseJSON(toolUseId: String, name: String, isSidechain: Bool) -> [String: Any] {
@@ -332,6 +426,24 @@ final class TranscriptParsingTests: XCTestCase {
         ]
         if isSidechain { top["isSidechain"] = true }
         return top
+    }
+
+    /// Assistant message with a usage block — the common shape for token tests.
+    private func makeUsageJSON(input: Int, output: Int, cacheRead: Int, cacheCreation: Int,
+                               model: String = "claude-opus-4-7", text: String = "ok") -> [String: Any] {
+        [
+            "type": "assistant",
+            "message": [
+                "model": model,
+                "usage": [
+                    "input_tokens": input,
+                    "output_tokens": output,
+                    "cache_read_input_tokens": cacheRead,
+                    "cache_creation_input_tokens": cacheCreation,
+                ],
+                "content": [["type": "text", "text": text]],
+            ],
+        ]
     }
 
     private func jsonString(_ obj: [String: Any]) -> String {

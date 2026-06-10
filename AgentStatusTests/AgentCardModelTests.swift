@@ -183,6 +183,73 @@ final class AgentCardModelTests: XCTestCase {
         XCTAssertNil(m.model)
     }
 
+    // MARK: - Context window gauge
+
+    func testContextFractionUsesModelLimit() {
+        var e = EnrichedSession.empty
+        e.currentModel = "claude-opus-4-8"
+        e.contextTokens = 100_000
+        let m = AgentCardModel.make(from: makeSnap(enriched: e), now: t0)
+        XCTAssertEqual(m.contextTokens, 100_000)
+        XCTAssertEqual(m.contextLimit, 200_000)
+        XCTAssertEqual(m.contextFraction, 0.5, accuracy: 0.0001)
+    }
+
+    func testContextLimitHonors1MModels() {
+        var e = EnrichedSession.empty
+        e.currentModel = "claude-sonnet-4-6[1m]"
+        e.contextTokens = 500_000
+        let m = AgentCardModel.make(from: makeSnap(enriched: e), now: t0)
+        XCTAssertEqual(m.contextLimit, 1_000_000)
+        XCTAssertEqual(m.contextFraction, 0.5, accuracy: 0.0001)
+    }
+
+    func testContextFractionZeroBeforeFirstUsage() {
+        let m = AgentCardModel.make(from: makeSnap(enriched: .empty), now: t0)
+        XCTAssertEqual(m.contextTokens, 0)
+        XCTAssertEqual(m.contextFraction, 0)
+    }
+
+    // MARK: - Branch
+
+    func testBranchExposedFromEnriched() {
+        var e = EnrichedSession.empty
+        e.gitBranch = "feature/polish"
+        let m = AgentCardModel.make(from: makeSnap(enriched: e), now: t0)
+        XCTAssertEqual(m.branch, "feature/polish")
+    }
+
+    // MARK: - Idle duration
+
+    func testIdleForShownAfterAMinute() {
+        let m = AgentCardModel.make(
+            from: makeSnap(status: .idle, updatedAt: t0.addingTimeInterval(-300)), now: t0)
+        XCTAssertEqual(m.idleFor, "5m 0s")
+    }
+
+    func testIdleForSuppressedWhenFresh() {
+        // Under a minute it's churn, not signal — suppressed.
+        let m = AgentCardModel.make(
+            from: makeSnap(status: .idle, updatedAt: t0.addingTimeInterval(-30)), now: t0)
+        XCTAssertEqual(m.idleFor, "")
+    }
+
+    func testErrorWithNothingInFlightShowsStuckDuration() {
+        // An errored session sitting untouched is the #1 "needs you" case —
+        // surface how long it's been stuck.
+        let m = AgentCardModel.make(
+            from: makeSnap(status: .error, updatedAt: t0.addingTimeInterval(-600)), now: t0)
+        XCTAssertEqual(m.idleFor, "10m 0s")
+    }
+
+    func testIdleForEmptyWhenBusy() {
+        var e = EnrichedSession.empty
+        e.activeTools = [tool(name: "Bash", preview: "make", startedAt: t0)]
+        let m = AgentCardModel.make(
+            from: makeSnap(status: .busy, updatedAt: t0.addingTimeInterval(-300), enriched: e), now: t0)
+        XCTAssertEqual(m.idleFor, "")
+    }
+
     // MARK: - Errors
 
     func testRecentErrorFlag() {
@@ -218,6 +285,7 @@ final class AgentCardModelTests: XCTestCase {
         status: SessionStatus = .idle,
         cwd: URL = URL(fileURLWithPath: "/tmp/sample"),
         isAlive: Bool = true,
+        updatedAt: Date? = nil,
         enriched: EnrichedSession? = nil
     ) -> SessionSnapshot {
         SessionSnapshot(
@@ -227,7 +295,7 @@ final class AgentCardModelTests: XCTestCase {
             sessionId: "s",
             cwd: cwd,
             startedAt: t0.addingTimeInterval(-200),
-            updatedAt: t0,
+            updatedAt: updatedAt ?? t0,
             status: status,
             waitingFor: status == .waiting ? "tool:Bash" : nil,
             version: nil,

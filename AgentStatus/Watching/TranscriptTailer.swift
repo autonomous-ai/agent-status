@@ -229,6 +229,12 @@ actor TranscriptTailer {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return }
 
+        // Claude Code stamps `gitBranch` on user/assistant/system records —
+        // harvest it from any record type, most recent non-empty wins.
+        if let branch = json["gitBranch"] as? String, !branch.isEmpty {
+            state.gitBranch = branch
+        }
+
         let type = json["type"] as? String ?? ""
         switch type {
         case "permission-mode":
@@ -244,7 +250,14 @@ actor TranscriptTailer {
             handleUserMessage(json)
 
         case "assistant":
-            if Self.isSidechain(json) { return }
+            if Self.isSidechain(json) {
+                // Subagent API calls are real spend — accumulate their usage,
+                // priced at the sidechain message's own model. Everything else
+                // (turns, context, currentModel, text, tools) belongs to the
+                // subagent's context, not this session's — skip it.
+                accumulateUsage(json, isSidechain: true)
+                return
+            }
             handleAssistantMessage(json)
 
         default:
@@ -315,28 +328,7 @@ actor TranscriptTailer {
         if let model = message["model"] as? String { state.currentModel = model }
         if let stop  = message["stop_reason"] as? String { state.lastStopReason = stop }
 
-        if let usage = message["usage"] as? [String: Any] {
-            // `input_tokens` is the fresh (uncached) input; cache_read /
-            // cache_creation are reported separately, so summing all four
-            // double-counts nothing. Each `usage` is one API call's billed
-            // tokens, so accumulating across messages gives true total spend.
-            let delta = TokenUsage(
-                input: usage["input_tokens"] as? Int ?? 0,
-                output: usage["output_tokens"] as? Int ?? 0,
-                cacheRead: usage["cache_read_input_tokens"] as? Int ?? 0,
-                cacheCreation: usage["cache_creation_input_tokens"] as? Int ?? 0
-            )
-            state.tokens += delta
-            // Price each message at the model that produced it, accumulating —
-            // a session that switches models (or runs a cheaper background turn)
-            // is costed correctly instead of repricing the entire running total
-            // at whatever model happened to be last. `currentModel` was just set
-            // from this message above. Idempotent: every transcript line is
-            // processed exactly once (byte offset is tracked), like `tokens +=`.
-            if let model = state.currentModel {
-                state.estimatedCost += ModelPricing.resolve(model).cost(for: delta)
-            }
-        }
+        accumulateUsage(json, isSidechain: false)
 
         // Walk content blocks for text + tool_use.
         guard let blocks = message["content"] as? [[String: Any]] else { return }
@@ -364,6 +356,37 @@ actor TranscriptTailer {
             }
         }
         recomputeActiveAndRecent()
+    }
+
+    /// Fold one assistant message's `usage` block into the running totals.
+    ///
+    /// `input_tokens` is the fresh (uncached) input; cache_read / cache_creation
+    /// are reported separately, so summing all four double-counts nothing. Each
+    /// `usage` is one API call's billed tokens, so accumulating across messages
+    /// gives true total spend. Idempotent: every transcript line is processed
+    /// exactly once (byte offset is tracked).
+    ///
+    /// Cost prices each message at the model that produced it — a session that
+    /// switches models (or runs subagents on a cheaper tier) is costed correctly
+    /// instead of repricing the running total at whatever model came last.
+    /// Sidechain messages are billed but are a different context, so they never
+    /// touch `contextTokens` or `currentModel`.
+    private func accumulateUsage(_ json: [String: Any], isSidechain: Bool) {
+        guard let message = json["message"] as? [String: Any],
+              let usage = message["usage"] as? [String: Any] else { return }
+        let delta = TokenUsage(
+            input: usage["input_tokens"] as? Int ?? 0,
+            output: usage["output_tokens"] as? Int ?? 0,
+            cacheRead: usage["cache_read_input_tokens"] as? Int ?? 0,
+            cacheCreation: usage["cache_creation_input_tokens"] as? Int ?? 0
+        )
+        state.tokens += delta
+        if let model = (message["model"] as? String) ?? state.currentModel {
+            state.estimatedCost += ModelPricing.resolve(model).cost(for: delta)
+        }
+        if !isSidechain {
+            state.contextTokens = delta.input + delta.cacheRead + delta.cacheCreation
+        }
     }
 
     /// Snapshot `toolStarts` into `state.activeTools` (sorted by startedAt asc)

@@ -26,7 +26,13 @@ final class AppEnvironment: ObservableObject {
         self.commander = CommanderWindowController(store: store, settings: settings)
     }
 
+    private var booted = false
+
+    /// Idempotent: callable from both the menu-bar popover's `.task` and the
+    /// `--commander` launch hook without double-subscribing notifications.
     func boot() async {
+        guard !booted else { return }
+        booted = true
         await store.start()
         notifications.start()
     }

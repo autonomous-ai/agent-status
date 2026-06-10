@@ -22,6 +22,14 @@ struct EnrichedSession: Hashable, Sendable {
     /// Active sub-agent name if one is currently running (last `agent-name` event
     /// not followed by a "release" — best effort).
     var subagentName: String? = nil
+    /// Git branch the session is on — Claude Code stamps `gitBranch` on every
+    /// user/assistant record; the most recent non-empty value wins.
+    var gitBranch: String? = nil
+    /// Live context size: input + cache_read + cache_creation of the *last*
+    /// top-level assistant message. A gauge (replaced per message), not a
+    /// meter — compare against the model's context window to see how close
+    /// the session is to auto-compaction. 0 until the first usage block.
+    var contextTokens: Int = 0
     /// Cumulative tokens across all assistant messages this session.
     var tokens: TokenUsage = .zero
     /// Estimated USD cost — uses the model resolved from `currentModel`. Approximate.
@@ -57,6 +65,8 @@ struct EnrichedSession: Hashable, Sendable {
             && aiTitle == other.aiTitle
             && lastUserPrompt == other.lastUserPrompt
             && lastAssistantText == other.lastAssistantText
+            && gitBranch == other.gitBranch
+            && contextTokens == other.contextTokens
             && subagentName == other.subagentName
             && tokens == other.tokens
             && estimatedCost == other.estimatedCost

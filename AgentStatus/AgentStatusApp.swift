@@ -18,6 +18,15 @@ struct AgentStatusApp: App {
             // would capture a stale snapshot — App's body only re-evaluates
             // on env's own objectWillChange, not the nested store's.
             MenuBarLabelView(store: env.store)
+                .task {
+                    // Dev/verification affordance: `open AgentStatus.app --args
+                    // --commander` boots the store and opens the Commander board
+                    // immediately, without clicking through the menu bar.
+                    if CommandLine.arguments.contains("--commander") {
+                        await env.boot()
+                        env.commander.show()
+                    }
+                }
         }
         .menuBarExtraStyle(.window)
     }

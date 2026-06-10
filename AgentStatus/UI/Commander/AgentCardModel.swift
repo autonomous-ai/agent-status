@@ -51,9 +51,16 @@ struct AgentCardModel: Equatable {
     let cost: String              // asUSD; "" when zero/unknown
     let model: String?            // short model id (sans "claude-")
     let permissionMode: String?   // "plan" / "auto" / "bypass" / …
+    let branch: String?           // git branch the session is on
+    let contextTokens: Int        // live context size at last API call
+    let contextLimit: Int         // model's context window
+    let idleFor: String           // how long a resting session has been idle; "" if <1m or not resting
 
     var hasTasks: Bool { tasksTotal > 0 }
     var taskFraction: Double { tasksTotal == 0 ? 0 : Double(tasksCompleted) / Double(tasksTotal) }
+    var contextFraction: Double {
+        contextLimit == 0 ? 0 : min(1, Double(contextTokens) / Double(contextLimit))
+    }
 
     static func make(from snap: SessionSnapshot, now: Date) -> AgentCardModel {
         let e = snap.enriched
@@ -83,6 +90,21 @@ struct AgentCardModel: Equatable {
         let grand = e?.tokens.grandTotal ?? 0
         let estCost = e?.estimatedCost ?? 0
 
+        // "Idle 14m" / "Error for 14m" matters (is this session stalled?);
+        // "30s" is churn. Quiet = alive with nothing in flight — busy/running
+        // without a tool means the model is generating ("Thinking"), not quiet.
+        let quiet: Bool = {
+            guard snap.isAlive, activity.isEmpty else { return false }
+            switch snap.status {
+            case .busy, .running: return false
+            default: return true
+            }
+        }()
+        let idleFor: String = {
+            guard quiet, now.timeIntervalSince(snap.updatedAt) >= 60 else { return "" }
+            return ElapsedFormatter.short(from: snap.updatedAt, to: now)
+        }()
+
         return AgentCardModel(
             id: snap.id,
             group: group(for: snap),
@@ -103,7 +125,11 @@ struct AgentCardModel: Equatable {
             tokens: grand > 0 ? TokenUsage.compact(grand) : "",
             cost: estCost > 0 ? estCost.asUSD : "",
             model: shortModel(e?.currentModel),
-            permissionMode: shortMode(e?.permissionMode)
+            permissionMode: shortMode(e?.permissionMode),
+            branch: e?.gitBranch,
+            contextTokens: e?.contextTokens ?? 0,
+            contextLimit: ContextWindow.limit(for: e?.currentModel),
+            idleFor: idleFor
         )
     }
 
