@@ -316,14 +316,25 @@ actor TranscriptTailer {
         if let stop  = message["stop_reason"] as? String { state.lastStopReason = stop }
 
         if let usage = message["usage"] as? [String: Any] {
-            state.tokens += TokenUsage(
+            // `input_tokens` is the fresh (uncached) input; cache_read /
+            // cache_creation are reported separately, so summing all four
+            // double-counts nothing. Each `usage` is one API call's billed
+            // tokens, so accumulating across messages gives true total spend.
+            let delta = TokenUsage(
                 input: usage["input_tokens"] as? Int ?? 0,
                 output: usage["output_tokens"] as? Int ?? 0,
                 cacheRead: usage["cache_read_input_tokens"] as? Int ?? 0,
                 cacheCreation: usage["cache_creation_input_tokens"] as? Int ?? 0
             )
+            state.tokens += delta
+            // Price each message at the model that produced it, accumulating —
+            // a session that switches models (or runs a cheaper background turn)
+            // is costed correctly instead of repricing the entire running total
+            // at whatever model happened to be last. `currentModel` was just set
+            // from this message above. Idempotent: every transcript line is
+            // processed exactly once (byte offset is tracked), like `tokens +=`.
             if let model = state.currentModel {
-                state.estimatedCost = ModelPricing.resolve(model).cost(for: state.tokens)
+                state.estimatedCost += ModelPricing.resolve(model).cost(for: delta)
             }
         }
 

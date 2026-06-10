@@ -251,6 +251,67 @@ final class TranscriptParsingTests: XCTestCase {
         XCTAssertEqual(snap.toolCalls, 10_000, "all lines should be parsed across multiple chunks")
     }
 
+    // MARK: - Token usage + cost accumulation
+
+    /// Each assistant `usage` block accumulates into the running token total, and
+    /// cost is the sum of per-call costs. Single model → priced at that model.
+    func testTokenAndCostAccumulateAcrossMessages() async {
+        let tailer = TranscriptTailer(sessionId: "tok", cwd: URL(fileURLWithPath: "/tmp"))
+        // Two opus turns: 1M cache_read + 100k output each.
+        for _ in 0..<2 {
+            await tailer._test_processLine(jsonString([
+                "type": "assistant",
+                "message": [
+                    "model": "claude-opus-4-7",
+                    "usage": [
+                        "input_tokens": 0,
+                        "output_tokens": 100_000,
+                        "cache_read_input_tokens": 1_000_000,
+                        "cache_creation_input_tokens": 0,
+                    ],
+                    "content": [["type": "text", "text": "ok"]],
+                ],
+            ]))
+        }
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.tokens.output, 200_000)
+        XCTAssertEqual(snap.tokens.cacheRead, 2_000_000)
+        XCTAssertEqual(snap.tokens.grandTotal, 2_200_000)
+        // 2 × (100k·$75/M + 1M·$1.50/M) = 2 × (7.50 + 1.50) = $18.00
+        XCTAssertEqual(snap.estimatedCost, 18.00, accuracy: 0.0001)
+    }
+
+    /// Cost must price each message at the model that produced it. A session that
+    /// switches models can't be costed by repricing the cumulative total at the
+    /// latest model — that's the bug this guards against.
+    func testCostPricesEachMessageAtItsOwnModel() async {
+        let tailer = TranscriptTailer(sessionId: "mix", cwd: URL(fileURLWithPath: "/tmp"))
+        // Opus turn: 1M output → 1M·$75/M = $75.00
+        await tailer._test_processLine(jsonString([
+            "type": "assistant",
+            "message": [
+                "model": "claude-opus-4-7",
+                "usage": ["input_tokens": 0, "output_tokens": 1_000_000,
+                          "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0],
+                "content": [["type": "text", "text": "a"]],
+            ],
+        ]))
+        // Haiku turn: 1M output → 1M·$5/M = $5.00
+        await tailer._test_processLine(jsonString([
+            "type": "assistant",
+            "message": [
+                "model": "claude-haiku-4-5",
+                "usage": ["input_tokens": 0, "output_tokens": 1_000_000,
+                          "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0],
+                "content": [["type": "text", "text": "b"]],
+            ],
+        ]))
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.tokens.output, 2_000_000)
+        // Correct: $75 + $5 = $80.00 (NOT 2M repriced at haiku = $10).
+        XCTAssertEqual(snap.estimatedCost, 80.00, accuracy: 0.0001)
+    }
+
     // MARK: - Test helpers
 
     private func makeAssistantToolUseJSON(toolUseId: String, name: String, isSidechain: Bool) -> [String: Any] {
