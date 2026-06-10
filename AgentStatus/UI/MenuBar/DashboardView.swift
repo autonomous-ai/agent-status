@@ -5,6 +5,7 @@ import SwiftUI
 struct DashboardView: View {
     @EnvironmentObject var store: SessionStore
     @EnvironmentObject var settings: Settings
+    @EnvironmentObject var commander: CommanderWindowController
     @State private var showingSettings = false
 
     var body: some View {
@@ -109,6 +110,14 @@ struct DashboardView: View {
             .controlSize(.mini)
 
             Spacer()
+
+            Button {
+                commander.toggle()
+            } label: {
+                Image(systemName: "rectangle.grid.2x2")
+            }
+            .buttonStyle(.borderless)
+            .help("Open Commander dashboard")
 
             Button {
                 showingSettings = true

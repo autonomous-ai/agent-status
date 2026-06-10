@@ -10,6 +10,7 @@ final class AppEnvironment: ObservableObject {
     let settings: Settings
     let perSessionItems: PerSessionItemController
     let notifications: NotificationManager
+    let commander: CommanderWindowController
 
     init() {
         let registry = ProviderRegistry()
@@ -22,6 +23,7 @@ final class AppEnvironment: ObservableObject {
         self.settings = settings
         self.perSessionItems = PerSessionItemController(store: store, settings: settings)
         self.notifications = NotificationManager(store: store, settings: settings)
+        self.commander = CommanderWindowController(store: store, settings: settings)
     }
 
     func boot() async {

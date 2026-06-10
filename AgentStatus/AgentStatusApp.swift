@@ -10,6 +10,7 @@ struct AgentStatusApp: App {
             DashboardView()
                 .environmentObject(env.store)
                 .environmentObject(env.settings)
+                .environmentObject(env.commander)
                 .task { await env.boot() }
         } label: {
             // Wrap in a small observable view so the label re-renders when
