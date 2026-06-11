@@ -310,6 +310,28 @@ final class PerSessionRowDataTests: XCTestCase {
         XCTAssertEqual(r.bottom, "2/2 done")
     }
 
+    // MARK: - Goal & loop
+
+    func testGoalConditionSurfaced() {
+        var e = EnrichedSession.empty
+        e.goalCondition = "make tests pass"
+        let r = PerSessionStatusItem.rowData(from: makeSnap(enriched: e), now: t0)
+        XCTAssertEqual(r.goal, "make tests pass")
+    }
+
+    func testLoopTargetSurfaced() {
+        var e = EnrichedSession.empty
+        e.loopTarget = "self-paced"
+        let r = PerSessionStatusItem.rowData(from: makeSnap(enriched: e), now: t0)
+        XCTAssertEqual(r.loop, "self-paced")
+    }
+
+    func testGoalAndLoopNilByDefault() {
+        let r = PerSessionStatusItem.rowData(from: makeSnap(), now: t0)
+        XCTAssertNil(r.goal)
+        XCTAssertNil(r.loop)
+    }
+
     // MARK: - Error pip window
 
     func testHasRecentErrorFalseWhenAllCleanInLastFive() {

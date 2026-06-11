@@ -117,6 +117,10 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
         /// Number of in-flight tool calls — drives the multi-dot icon for
         /// busy/running states. Zero in all other states.
         let activeToolCount: Int
+        /// Active `/goal` condition the session is working toward; nil if none.
+        let goal: String?
+        /// Best-effort `/loop` target; nil if not looping.
+        let loop: String?
     }
 
     /// Pure: snapshot + now → RowData. The `now: Date` parameter is the
@@ -145,7 +149,9 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
             bottom: bottom,
             dim: !snap.isAlive,
             hasRecentError: hasRecentError,
-            activeToolCount: activeToolCount
+            activeToolCount: activeToolCount,
+            goal: snap.enriched?.goalCondition,
+            loop: snap.enriched?.loopTarget
         )
     }
 

@@ -21,6 +21,7 @@ final class CardSnapshotRenderTests: XCTestCase {
         try render(name: "waiting-question", snap: waitingSnap())
         try render(name: "error-stuck", snap: errorSnap())
         try render(name: "idle-resting", snap: idleSnap())
+        try render(name: "goal-loop", snap: autonomousSnap())
         try render(name: "ended", snap: endedSnap(), buckets: [])
     }
 
@@ -150,6 +151,15 @@ final class CardSnapshotRenderTests: XCTestCase {
         var e = commonEnriched()
         e.contextTokens = 52_000
         return base(.idle, updatedAt: -1_080, enriched: e)
+    }
+
+    private func autonomousSnap() -> SessionSnapshot {
+        var e = commonEnriched()
+        e.goalCondition = "all integration tests green on CI"
+        e.loopTarget = "10m /babysit-prs"
+        e.activeTools = [ActiveTool(id: "t1", name: "Bash", preview: "gh pr checks",
+                                    startedAt: t0.addingTimeInterval(-12))]
+        return base(.busy, enriched: e)
     }
 
     private func endedSnap() -> SessionSnapshot {
