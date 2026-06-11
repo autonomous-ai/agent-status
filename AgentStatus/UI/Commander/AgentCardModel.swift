@@ -41,6 +41,12 @@ struct AgentCardModel: Equatable {
     let dim: Bool                 // session no longer alive
     let hasRecentError: Bool      // any of the last 5 completed tools errored
 
+    // Thinking (busy/running with no tool in flight — the model is generating).
+    // Instead of a bare "Thinking…", surface the last thing it did and how long
+    // it's been generating since — a quick vs stuck signal.
+    let lastAction: String?       // most recent completed tool, e.g. "Edit · SKILL.md"; nil if none yet
+    let thinkingElapsed: String   // time since that last action; "" if no anchor
+
     // Task list
     let taskHeadline: String?     // "▸ Rewriting parser" (in-progress, else next pending)
     let tasksCompleted: Int
@@ -58,6 +64,8 @@ struct AgentCardModel: Equatable {
 
     // Autonomy
     let goal: String?             // active /goal condition the session is working toward; nil if none
+    let goalAchieved: Bool        // the /goal condition was met — show a green "achieved" state, not the active banner
+    let goalSummary: String?      // "12m · 1 turn · 53.2k" run summary; nil unless achieved
     let loop: String?             // best-effort /loop target ("5m /foo" / "self-paced"); nil if not looping
 
     var hasTasks: Bool { tasksTotal > 0 }
@@ -77,6 +85,15 @@ struct AgentCardModel: Equatable {
         let (activity, anchor, isWaiting) = activityLine(for: snap)
         let activityElapsed = anchor.map { ElapsedFormatter.short(from: $0, to: now) } ?? ""
 
+        // Most recent completed tool — the "just did X" hint shown while thinking.
+        // recentTools is newest-first; its endedAt anchors the thinking timer.
+        let lastCompleted = (e?.recentTools ?? []).first
+        let lastAction: String? = lastCompleted.map { t in
+            let p = t.preview.trimmingCharacters(in: .whitespaces)
+            return p.isEmpty ? t.name : "\(t.name) · \(p)"
+        }
+        let thinkingElapsed = lastCompleted.map { ElapsedFormatter.short(from: $0.endedAt, to: now) } ?? ""
+
         let live = (e?.todos ?? []).filter { $0.status != .deleted }
         let completed = live.filter { $0.status == .completed }.count
         let headline: String? = {
@@ -89,6 +106,15 @@ struct AgentCardModel: Equatable {
             }
             return nil   // all tasks done — the k/n counter says it
         }()
+
+        // Goal-achieved summary, mirroring the CLI's "Goal achieved (12m · 1 turn
+        // · 53.2k tokens)". Presence of an outcome IS the achieved signal.
+        let goalSummary: String? = e?.goalOutcome.map { o in
+            let secs = o.durationMs / 1000
+            let dur = secs >= 60 ? "\(secs / 60)m" : "\(secs)s"
+            let turns = "\(o.iterations) turn" + (o.iterations == 1 ? "" : "s")
+            return "\(dur) · \(turns) · \(TokenUsage.compact(o.tokens))"
+        }
 
         let recentError = (e?.recentTools ?? []).prefix(5).contains { $0.isError }
         let grand = e?.tokens.grandTotal ?? 0
@@ -123,6 +149,8 @@ struct AgentCardModel: Equatable {
             activeToolCount: e?.activeTools.count ?? 0,
             dim: !snap.isAlive,
             hasRecentError: recentError,
+            lastAction: lastAction,
+            thinkingElapsed: thinkingElapsed,
             taskHeadline: headline,
             tasksCompleted: completed,
             tasksTotal: live.count,
@@ -135,6 +163,8 @@ struct AgentCardModel: Equatable {
             contextLimit: ContextWindow.limit(for: e?.currentModel),
             idleFor: idleFor,
             goal: e?.goalCondition,
+            goalAchieved: e?.goalOutcome != nil,
+            goalSummary: goalSummary,
             loop: e?.loopTarget
         )
     }

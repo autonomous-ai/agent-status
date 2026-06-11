@@ -69,4 +69,12 @@ final class EnrichedSessionCoreEqualTests: XCTestCase {
         b.loopTarget = "5m /babysit"
         XCTAssertFalse(a.coreEqual(b))
     }
+
+    func testCoreEqualNoticesGoalOutcomeChange() {
+        // Goal-achieved must trigger a republish so the card flips to green.
+        let a = EnrichedSession.empty
+        var b = EnrichedSession.empty
+        b.goalOutcome = GoalOutcome(durationMs: 1_000, iterations: 1, tokens: 10)
+        XCTAssertFalse(a.coreEqual(b))
+    }
 }

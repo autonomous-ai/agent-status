@@ -1,22 +1,30 @@
 import SwiftUI
 
-/// Bold, filled gradient area chart of the last `span` seconds of session
-/// activity — a vivid sibling of the menu bar's thin `SparklineView`. Same
-/// bucket data (`HistoryBuffer.bucket(into:span:)`), but rendered as a smooth
-/// filled area with a bright top line so it reads as a chart on the board.
+/// Bold, filled gradient area chart of a session's recent token-spend curve —
+/// the cumulative grand-total over the last span, normalized to its own min/max.
+/// A climbing line means the agent is actively burning tokens; a flat one means
+/// it's stalled. Sits beside the big token/cost number so the two read together.
 struct BoldSparkline: View {
-    let buckets: [SessionStatus?]
+    /// Cumulative token totals, one per time bucket (oldest → newest). `nil`
+    /// entries are leading gaps before the session's first sample.
+    let values: [Double?]
     var tint: Color = .blue
     var height: CGFloat = 40
 
     var body: some View {
         Canvas { ctx, size in
-            guard buckets.count > 1 else { return }
-            let n = CGFloat(buckets.count - 1)
+            let known = values.compactMap { $0 }
+            guard known.count > 1 else { return }
+            let lo = known.min() ?? 0
+            let hi = known.max() ?? 0
+            let range = hi - lo
+
+            let n = CGFloat(values.count - 1)
             let stepX = size.width / n
-            // Map each bucket to a normalized height; nil → baseline.
-            let pts: [CGPoint] = buckets.enumerated().map { i, b in
-                let weight = b.map(Self.activityWeight) ?? 0.05
+            // Normalize each value into the card window's own range; a flat
+            // (no-spend) window collapses to a thin line along the baseline.
+            let pts: [CGPoint] = values.enumerated().map { i, v in
+                let weight: CGFloat = (range > 0) ? CGFloat(((v ?? lo) - lo) / range) : 0
                 let y = size.height - max(2, size.height * weight)
                 return CGPoint(x: CGFloat(i) * stepX, y: y)
             }
@@ -42,20 +50,5 @@ struct BoldSparkline: View {
         }
         .frame(height: height)
         .accessibilityHidden(true)
-    }
-
-    /// Visual weight per status — mirrors `SparklineView.activityHeight` so the
-    /// two charts agree on what "tall" means.
-    static func activityWeight(_ status: SessionStatus) -> CGFloat {
-        switch status {
-        case .error:   1.0
-        case .waiting: 0.85
-        case .busy:    0.85
-        case .running: 0.7
-        case .idle:    0.25
-        case .paused:  0.15
-        case .stopped: 0.1
-        case .unknown: 0.15
-        }
     }
 }

@@ -155,7 +155,7 @@ struct CommanderView: View {
                     ForEach(rowSnaps) { snap in
                         AgentCard(
                             model: AgentCardModel.make(from: snap, now: now),
-                            buckets: store.history(for: snap.id).bucket(into: 60, span: 60),
+                            spend: store.history(for: snap.id).tokenSeries(into: 60, span: 60, now: now),
                             isSelected: selected == snap.id,
                             onTap: { toggle(snap.id) }
                         )

@@ -46,4 +46,32 @@ final class HistoryBufferTests: XCTestCase {
         XCTAssertNotNil(strip.last as Any?)
         XCTAssertEqual(strip.last??.precedence, SessionStatus.busy.precedence)
     }
+
+    // MARK: - Token series (Commander spend sparkline)
+
+    func testTokenChangeIsNotCoalesced() {
+        // Same status but growing tokens must each be retained, else the spend
+        // curve would collapse to a single point.
+        let buf = HistoryBuffer(cap: 10)
+        let t0 = Date()
+        buf.append(.init(timestamp: t0, status: .busy, tokens: 100))
+        buf.append(.init(timestamp: t0.addingTimeInterval(1), status: .busy, tokens: 200))
+        buf.append(.init(timestamp: t0.addingTimeInterval(2), status: .busy, tokens: 200))  // unchanged → coalesced
+        XCTAssertEqual(buf.samples.count, 2)
+        XCTAssertEqual(buf.samples.map(\.tokens), [100, 200])
+    }
+
+    func testTokenSeriesIsCumulativeAndForwardFills() {
+        let buf = HistoryBuffer()
+        let now = Date()
+        buf.append(.init(timestamp: now.addingTimeInterval(-50), status: .busy, tokens: 1_000))
+        buf.append(.init(timestamp: now.addingTimeInterval(-20), status: .busy, tokens: 4_000))
+        let series = buf.tokenSeries(into: 6, span: 60, now: now)
+        XCTAssertEqual(series.count, 6)
+        // Forward-filled to the latest known total at the right edge.
+        XCTAssertEqual(series.last ?? nil, 4_000)
+        // Non-decreasing across the filled portion (cumulative).
+        let filled = series.compactMap { $0 }
+        XCTAssertEqual(filled, filled.sorted())
+    }
 }

@@ -59,7 +59,8 @@ final class SessionStore: ObservableObject {
         // doesn't trigger any UI re-render — it just keeps sparkline samples honest).
         let now = Date()
         for s in incoming where s.isAlive {
-            history(for: s.id).append(SessionHistorySample(timestamp: now, status: s.status))
+            history(for: s.id).append(SessionHistorySample(
+                timestamp: now, status: s.status, tokens: s.enriched?.tokens.grandTotal ?? 0))
         }
 
         // Skip the @Published recompute if nothing UI-relevant changed. This is

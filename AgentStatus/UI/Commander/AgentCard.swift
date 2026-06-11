@@ -6,7 +6,7 @@ import SwiftUI
 /// parent supplies a shared 1 Hz `now`.
 struct AgentCard: View {
     let model: AgentCardModel
-    let buckets: [SessionStatus?]
+    let spend: [Double?]          // cumulative token totals over the last window
     let isSelected: Bool
     var onTap: () -> Void
 
@@ -98,7 +98,7 @@ struct AgentCard: View {
                     .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.tail)
                 HStack(spacing: 6) {
                     Text(model.subtitle)
                         .font(.system(size: 12, weight: .medium))
@@ -150,10 +150,30 @@ struct AgentCard: View {
                     .font(.system(size: 15))
                     .foregroundStyle(accent)
                     .symbolRenderingMode(.hierarchical)
-                Text("Thinking…")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.primary)
+                // Surface what it just did rather than a bare "Thinking…"; the
+                // elapsed timer then reads as "how long it's been generating since".
+                if let last = model.lastAction {
+                    Text("just ")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    + Text(last)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.primary)
+                } else {
+                    Text("Thinking…")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.primary)
+                }
+                if !model.thinkingElapsed.isEmpty {
+                    Spacer(minLength: 4)
+                    Text(model.thinkingElapsed)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
             }
+            .lineLimit(1)
+            .truncationMode(.tail)
             .padding(.vertical, 9)
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -230,9 +250,13 @@ struct AgentCard: View {
     /// NOT done, so this sits high on the card where it can't be missed.
     @ViewBuilder
     private var autonomyRow: some View {
-        if model.goal != nil || model.loop != nil {
+        if model.goalAchieved || model.goal != nil || model.loop != nil {
             HStack(spacing: 8) {
-                if let goal = model.goal {
+                // An achieved goal flips the banner from pink "pursuing" to green
+                // "done" — so a resting goal session no longer reads as "stalled".
+                if model.goalAchieved {
+                    goalAchievedChip(summary: model.goalSummary)
+                } else if let goal = model.goal {
                     autonomyChip(icon: "target", label: goal, tint: .pink)
                 }
                 if let loop = model.loop {
@@ -242,6 +266,30 @@ struct AgentCard: View {
                 Spacer(minLength: 0)
             }
         }
+    }
+
+    /// Green "✓ Goal achieved · 12m · 1 turn · 53.2k" banner — the met-condition
+    /// counterpart to the pink active-goal chip.
+    private func goalAchievedChip(summary: String?) -> some View {
+        let tint = Color.green
+        return HStack(spacing: 5) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 11, weight: .bold))
+            Text("Goal achieved")
+                .font(.system(size: 11, weight: .semibold))
+            if let summary {
+                Text(summary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .foregroundStyle(model.dim ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(tint.opacity(model.dim ? 0.06 : 0.16), in: Capsule())
+        .overlay(Capsule().strokeBorder(tint.opacity(model.dim ? 0.15 : 0.4), lineWidth: 1))
     }
 
     private func autonomyChip(icon: String, label: String, tint: Color) -> some View {
@@ -334,7 +382,7 @@ struct AgentCard: View {
             Spacer(minLength: 8)
             // The flexible element: the chart absorbs whatever width the fixed
             // stats leave over, down to nothing on the narrowest cards.
-            BoldSparkline(buckets: buckets, tint: accent, height: 40)
+            BoldSparkline(values: spend, tint: accent, height: 40)
                 .frame(maxWidth: 150)
         }
     }

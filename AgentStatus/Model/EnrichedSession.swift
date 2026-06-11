@@ -49,6 +49,13 @@ struct EnrichedSession: Hashable, Sendable {
     /// as "put under a goal", never used to reclassify status.
     var goalCondition: String? = nil
 
+    /// Set when the active `/goal` condition has been MET — folded from the
+    /// `goal_status` attachment record with `met:true`. Carries the run summary
+    /// the CLI prints as "Goal achieved (12m · 1 turn · 53.2k tokens)". `nil`
+    /// while a goal is still active or none was set; a freshly-set goal resets it.
+    /// `goalCondition` keeps the condition text so the card shows what was met.
+    var goalOutcome: GoalOutcome? = nil
+
     /// Best-effort `/loop` target — set when the session was put into `/loop`
     /// mode, carrying the loop's args (e.g. "5m /babysit") or "self-paced" when
     /// the interval is omitted. `nil` when not looping. Loop *stop* is not
@@ -88,6 +95,7 @@ struct EnrichedSession: Hashable, Sendable {
             && assistantTurns == other.assistantTurns
             && toolCalls == other.toolCalls
             && goalCondition == other.goalCondition
+            && goalOutcome == other.goalOutcome
             && loopTarget == other.loopTarget
             && currentTool == other.currentTool
             && activeTools == other.activeTools
@@ -96,6 +104,14 @@ struct EnrichedSession: Hashable, Sendable {
     }
 
     static let empty = EnrichedSession()
+}
+
+/// Summary of a completed `/goal` run — sourced from the `met:true` `goal_status`
+/// attachment. Mirrors the CLI's "Goal achieved (12m · 1 turn · 53.2k tokens)".
+struct GoalOutcome: Hashable, Sendable {
+    let durationMs: Int     // wall-clock the goal loop ran
+    let iterations: Int     // re-prompt turns the Stop hook drove
+    let tokens: Int         // tokens spent pursuing the goal
 }
 
 /// Completion state of one task/todo item. Raw values match Claude Code's
