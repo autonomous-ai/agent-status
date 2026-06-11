@@ -446,6 +446,52 @@ final class TranscriptParsingTests: XCTestCase {
         XCTAssertNil(snap.goalCondition)
     }
 
+    private func goalStatusJSON(met: Bool, condition: String,
+                                durationMs: Int? = nil, iterations: Int? = nil,
+                                tokens: Int? = nil) -> [String: Any] {
+        var att: [String: Any] = ["type": "goal_status", "met": met, "condition": condition]
+        if let durationMs { att["durationMs"] = durationMs }
+        if let iterations { att["iterations"] = iterations }
+        if let tokens { att["tokens"] = tokens }
+        return ["type": "attachment", "attachment": att]
+    }
+
+    func testGoalSetFromStatusAttachment() async {
+        // The met:false sentinel emitted when a goal is set is the authoritative
+        // source — carries the condition, no outcome yet.
+        let tailer = TranscriptTailer(sessionId: "gs1", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString(
+            goalStatusJSON(met: false, condition: "ship the thing")))
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.goalCondition, "ship the thing")
+        XCTAssertNil(snap.goalOutcome, "an active goal has no outcome yet")
+    }
+
+    func testGoalAchievedFromStatusAttachment() async {
+        let tailer = TranscriptTailer(sessionId: "gs2", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString(
+            goalStatusJSON(met: false, condition: "ship the thing")))
+        await tailer._test_processLine(jsonString(
+            goalStatusJSON(met: true, condition: "ship the thing",
+                           durationMs: 728_241, iterations: 1, tokens: 53_203)))
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.goalCondition, "ship the thing")
+        XCTAssertEqual(snap.goalOutcome, GoalOutcome(durationMs: 728_241, iterations: 1, tokens: 53_203))
+    }
+
+    func testFreshGoalResetsPriorOutcome() async {
+        // Achieve one goal, then set a new one — the win must clear so the new
+        // goal reads as active, not stale-achieved.
+        let tailer = TranscriptTailer(sessionId: "gs3", cwd: URL(fileURLWithPath: "/tmp"))
+        await tailer._test_processLine(jsonString(
+            goalStatusJSON(met: true, condition: "first", durationMs: 1_000, iterations: 1, tokens: 10)))
+        await tailer._test_processLine(jsonString(
+            goalStatusJSON(met: false, condition: "second")))
+        let snap = await tailer._test_state
+        XCTAssertEqual(snap.goalCondition, "second")
+        XCTAssertNil(snap.goalOutcome)
+    }
+
     func testLoopDetectedFromCommand() async {
         let tailer = TranscriptTailer(sessionId: "loop1", cwd: URL(fileURLWithPath: "/tmp"))
         await tailer._test_processLine(jsonString(userTextJSON(

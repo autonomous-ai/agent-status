@@ -92,6 +92,31 @@ final class AgentCardModelTests: XCTestCase {
         XCTAssertNil(m.loop)
     }
 
+    func testActiveGoalIsNotAchieved() {
+        var e = EnrichedSession.empty
+        e.goalCondition = "ship the thing"
+        let m = AgentCardModel.make(from: makeSnap(enriched: e), now: t0)
+        XCTAssertEqual(m.goal, "ship the thing")
+        XCTAssertFalse(m.goalAchieved)
+        XCTAssertNil(m.goalSummary)
+    }
+
+    func testGoalAchievedSurfacesSummary() {
+        var e = EnrichedSession.empty
+        e.goalCondition = "ship the thing"
+        e.goalOutcome = GoalOutcome(durationMs: 728_241, iterations: 1, tokens: 53_203)
+        let m = AgentCardModel.make(from: makeSnap(enriched: e), now: t0)
+        XCTAssertTrue(m.goalAchieved)
+        XCTAssertEqual(m.goalSummary, "12m · 1 turn · 53.2k")   // mirrors the CLI line
+    }
+
+    func testGoalAchievedPluralizesTurns() {
+        var e = EnrichedSession.empty
+        e.goalOutcome = GoalOutcome(durationMs: 45_000, iterations: 3, tokens: 1_200)
+        let m = AgentCardModel.make(from: makeSnap(enriched: e), now: t0)
+        XCTAssertEqual(m.goalSummary, "45s · 3 turns · 1.2k")
+    }
+
     // MARK: - Activity line
 
     func testIdleHasNoActivity() {
@@ -295,7 +320,41 @@ final class AgentCardModelTests: XCTestCase {
         XCTAssertTrue(m.hasRecentError)
     }
 
+    // MARK: - Thinking (last action + timer)
+
+    func testLastActionFromMostRecentCompletedTool() {
+        // recentTools is newest-first, so the head is the most recent action.
+        var e = EnrichedSession.empty
+        e.recentTools = [
+            done(name: "Edit", preview: "SKILL.md", endedAt: t0.addingTimeInterval(-72)),
+            done(name: "Bash", preview: "make", endedAt: t0.addingTimeInterval(-200)),
+        ]
+        let m = AgentCardModel.make(from: makeSnap(status: .busy, enriched: e), now: t0)
+        XCTAssertEqual(m.lastAction, "Edit · SKILL.md")
+        XCTAssertEqual(m.thinkingElapsed, "1m 12s")   // anchored to that tool's endedAt
+    }
+
+    func testLastActionEmptyPreviewShowsNameOnly() {
+        var e = EnrichedSession.empty
+        e.recentTools = [done(name: "Read", preview: "  ", endedAt: t0.addingTimeInterval(-5))]
+        let m = AgentCardModel.make(from: makeSnap(status: .busy, enriched: e), now: t0)
+        XCTAssertEqual(m.lastAction, "Read")
+        XCTAssertEqual(m.thinkingElapsed, "5s")
+    }
+
+    func testNoLastActionBeforeAnyToolRuns() {
+        let m = AgentCardModel.make(from: makeSnap(status: .busy, enriched: .empty), now: t0)
+        XCTAssertNil(m.lastAction)
+        XCTAssertEqual(m.thinkingElapsed, "")
+    }
+
     // MARK: - Helpers
+
+    private func done(name: String, preview: String, endedAt: Date) -> CompletedTool {
+        let a = ActiveTool(id: UUID().uuidString, name: name, preview: preview,
+                           startedAt: endedAt.addingTimeInterval(-1), rawInputJSON: nil)
+        return CompletedTool(completing: a, isError: false, at: endedAt)
+    }
 
     private func tool(name: String, preview: String, startedAt: Date) -> ActiveTool {
         ActiveTool(id: UUID().uuidString, name: name, preview: preview, startedAt: startedAt, rawInputJSON: nil)

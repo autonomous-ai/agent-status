@@ -22,17 +22,18 @@ final class CardSnapshotRenderTests: XCTestCase {
         try render(name: "error-stuck", snap: errorSnap())
         try render(name: "idle-resting", snap: idleSnap())
         try render(name: "goal-loop", snap: autonomousSnap())
-        try render(name: "ended", snap: endedSnap(), buckets: [])
+        try render(name: "goal-achieved", snap: goalAchievedSnap())
+        try render(name: "ended", snap: endedSnap(), spend: [])
     }
 
     // MARK: - Render plumbing
 
     private func render(name: String, snap: SessionSnapshot,
-                        buckets: [SessionStatus?]? = nil) throws {
+                        spend: [Double?]? = nil) throws {
         let model = AgentCardModel.make(from: snap, now: t0)
         let card = AgentCard(
             model: model,
-            buckets: buckets ?? demoBuckets(for: snap.status),
+            spend: spend ?? demoSpend(),
             isSelected: false,
             onTap: {}
         )
@@ -55,14 +56,13 @@ final class CardSnapshotRenderTests: XCTestCase {
         XCTAssertGreaterThan(png.count, 1_000, "\(name).png suspiciously small")
     }
 
-    /// A plausible 60-bucket activity history for the sparkline.
-    private func demoBuckets(for status: SessionStatus) -> [SessionStatus?] {
-        (0..<60).map { i in
-            switch i % 7 {
-            case 0, 1: nil
-            case 2:    SessionStatus.idle
-            default:   status
-            }
+    /// A plausible 60-bucket cumulative token curve for the spend sparkline —
+    /// climbing with a few flat stretches, so the rendered chart has shape.
+    private func demoSpend() -> [Double?] {
+        var total = 1_200_000.0
+        return (0..<60).map { i in
+            total += Double((i % 5) * 40_000)   // bursty growth
+            return total
         }
     }
 
@@ -124,7 +124,14 @@ final class CardSnapshotRenderTests: XCTestCase {
     }
 
     private func thinkingSnap() -> SessionSnapshot {
-        base(.busy, enriched: commonEnriched())
+        var e = commonEnriched()
+        // Generating with no tool in flight, but it just finished an Edit — the
+        // card should read "just Edit · queue.ts · <timer>", not a bare "Thinking…".
+        let edited = ActiveTool(id: "t9", name: "Edit", preview: "queue.ts",
+                                startedAt: t0.addingTimeInterval(-95), rawInputJSON: nil)
+        e.recentTools = [CompletedTool(completing: edited, isError: false,
+                                       at: t0.addingTimeInterval(-72))]
+        return base(.busy, enriched: e)
     }
 
     private func waitingSnap() -> SessionSnapshot {
@@ -160,6 +167,16 @@ final class CardSnapshotRenderTests: XCTestCase {
         e.activeTools = [ActiveTool(id: "t1", name: "Bash", preview: "gh pr checks",
                                     startedAt: t0.addingTimeInterval(-12))]
         return base(.busy, enriched: e)
+    }
+
+    private func goalAchievedSnap() -> SessionSnapshot {
+        // The scenario from the report: a /goal session that's done and resting —
+        // the banner must read green "Goal achieved", not a stale pink "pursuing".
+        var e = commonEnriched()
+        e.goalCondition = "design a protocol/open standard so the community can build adapters"
+        e.goalOutcome = GoalOutcome(durationMs: 728_241, iterations: 1, tokens: 53_203)
+        e.contextTokens = 128_000
+        return base(.idle, updatedAt: -455, enriched: e)
     }
 
     private func endedSnap() -> SessionSnapshot {

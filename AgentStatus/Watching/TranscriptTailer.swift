@@ -246,6 +246,9 @@ actor TranscriptTailer {
         case "agent-name":
             if let n = json["name"] as? String { state.subagentName = n }
 
+        case "attachment":
+            handleAttachment(json)
+
         case "user":
             handleUserMessage(json)
 
@@ -322,6 +325,29 @@ actor TranscriptTailer {
                 state.lastUserPrompt = joined
                 applyGoalAndLoopSignals(joined)
             }
+        }
+    }
+
+    /// Fold a `goal_status` attachment — the authoritative `/goal` signal Claude
+    /// Code writes to the transcript (more reliable than scraping command stdout).
+    /// The `met:false` sentinel emitted when a goal is set carries the active
+    /// condition; `met:true` marks it achieved and carries the run summary the CLI
+    /// prints as "Goal achieved (12m · 1 turn · 53.2k tokens)".
+    private func handleAttachment(_ json: [String: Any]) {
+        guard let att = json["attachment"] as? [String: Any],
+              (att["type"] as? String) == "goal_status" else { return }
+        if let condition = (att["condition"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !condition.isEmpty {
+            state.goalCondition = condition
+        }
+        if (att["met"] as? Bool) == true {
+            state.goalOutcome = GoalOutcome(
+                durationMs: (att["durationMs"] as? Int) ?? 0,
+                iterations: (att["iterations"] as? Int) ?? 0,
+                tokens: (att["tokens"] as? Int) ?? 0)
+        } else {
+            // A freshly-set goal (met:false sentinel) supersedes any prior win.
+            state.goalOutcome = nil
         }
     }
 
