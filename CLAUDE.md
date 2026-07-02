@@ -24,11 +24,46 @@ xcodebuild ... test -only-testing:AgentStatusTests/AgentCardModelTests
 xcodebuild ... test -only-testing:AgentStatusTests/AgentCardModelTests/testIdleForShownAfterAMinute
 
 scripts/perf-check.sh        # perf gate: PerfBenchmarks vs scripts/perf-baseline.txt (fails >2x)
+
+scripts/verify.sh            # full pre-PR gate: xcodegen → build → test → perf → render snapshots
 ```
+
+`/verify` (slash command) runs `scripts/verify.sh` then `/code-review` on the diff — the one-command way to close the dev loop below.
 
 Launch for visual verification: `open build/Build/Products/Release/AgentStatus.app --args --commander` opens the fullscreen Commander board immediately (no menu-bar clicking). Kill a previous instance first (`pkill -x AgentStatus`) — only one instance reads the status items cleanly.
 
 Headless UI snapshots (work even on a locked screen): `CardSnapshotRenderTests` and `DetailStripSnapshotRenderTests` render every card / detail-strip state via `ImageRenderer` to `/tmp/card-snapshots/` and `/tmp/strip-snapshots/` for eyeball review after UI changes.
+
+## Dev loop
+
+The repeatable cycle for changing this app. Gates marked `*` are **conditional** — run them only when the change touches that area (see the table). Cheap by default, thorough when it matters.
+
+```
+0. FRAME   Non-trivial change? → brainstorming → writing-plans. Feature/bugfix → TDD (test first).
+1. CHANGE  Edit source. Added/removed a file? → edit project.yml, then `xcodegen generate`.
+           Added a field a view reads? → add it to `EnrichedSession.coreEqual` + `EnrichedSessionCoreEqualTests`,
+           or the UI silently won't update (see Architecture §3 and Gotchas).
+2. BUILD   xcodebuild … build — fast compile check.
+3. TEST    xcodebuild … test, iterating with `-only-testing:` on the class you touched.
+4. PERF*   Touched Watching/ or transcript parsing? → scripts/perf-check.sh.
+5. VISUAL* Touched UI/? → run the *SnapshotRenderTests, eyeball /tmp/*-snapshots/;
+           launch --commander for interactive changes.
+6. REVIEW  /code-review on the diff before PR.
+7. SHIP    finishing-a-development-branch → commit + PR.
+```
+
+Which gates fire for what you touched:
+
+| Touched | Build | Tests | Perf | Snapshots | Commander |
+|---|---|---|---|---|---|
+| `Model/`, `Store/` | ✓ | ✓ | — | — | — |
+| `Watching/`, parsing (`ClaudeCode/`) | ✓ | ✓ | ✓ | — | — |
+| `UI/` (any view) | ✓ | ✓ | — | ✓ | interactive changes |
+| `App/`, `Util/`, `Providers/` plumbing | ✓ | ✓ | — | — | — |
+| `project.yml` / file add or remove | ✓ (after `xcodegen generate`) | ✓ | — | — | — |
+| Docs / comments only | — | — | — | — | — |
+
+**Before any PR**, regardless of the table: run `scripts/verify.sh` (or `/verify`, which also runs `/code-review`).
 
 ## Architecture
 
