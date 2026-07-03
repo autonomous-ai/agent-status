@@ -11,6 +11,12 @@ struct CommanderView: View {
     @EnvironmentObject var settings: Settings
     @State private var selected: String?
 
+    /// Headless-render mode (README/marketing snapshots via `ImageRenderer`,
+    /// which can't lay out `ScrollView`/`LazyVStack`): lay the groups out in a
+    /// plain `VStack` with a fixed column count. No effect on the live board.
+    var staticLayout: Bool = false
+    var staticColumns: Int = 3
+
     private let minCardWidth: CGFloat = 360
     private let cardSpacing: CGFloat = 16
 
@@ -118,6 +124,22 @@ struct CommanderView: View {
     private func content(now: Date) -> some View {
         if store.snapshots.isEmpty {
             emptyState
+        } else if staticLayout {
+            VStack(alignment: .leading, spacing: 24) {
+                ForEach(CommanderGroup.allCases, id: \.self) { group in
+                    let snaps = snapshots(in: group)
+                    if !snaps.isEmpty {
+                        VStack(alignment: .leading, spacing: 0) {
+                            groupHeader(group, count: snaps.count)
+                            grid(snaps, columns: staticColumns, now: now)
+                                .padding(.horizontal, 24)
+                                .padding(.top, 12)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             GeometryReader { geo in
                 let columns = max(1, Int((geo.size.width - 48 + cardSpacing) / (minCardWidth + cardSpacing)))
