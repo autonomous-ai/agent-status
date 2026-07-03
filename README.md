@@ -6,7 +6,9 @@ A native macOS menu bar app that tells you what your AI coding agents are doing 
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue) ![Swift 6](https://img.shields.io/badge/Swift-6-orange)
 
-<!-- Drop a screenshot or animated GIF at docs/screenshot.png and re-add an image link here. -->
+![Commander board — every Claude Code session grouped by urgency](docs/commander-board.png)
+
+<sub>The optional fullscreen **Commander board**: sessions grouped by urgency (Needs you / Working / Idle / Ended), each card showing the live tool, task progress, context-window gauge, tokens & cost. (Synthetic data.)</sub>
 
 
 ## Features
