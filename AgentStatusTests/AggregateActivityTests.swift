@@ -31,6 +31,7 @@ final class AggregateActivityTests: XCTestCase {
     func testEmptyWhenNoLiveSessions() {
         let a = AggregateActivity.make(from: [], now: t0)
         XCTAssertEqual(a.mode, .empty)
+        XCTAssertEqual(a.total, 0)
         XCTAssertEqual(a.text, "")
         XCTAssertNil(a.badge)
         XCTAssertFalse(a.urgent)
@@ -41,15 +42,30 @@ final class AggregateActivityTests: XCTestCase {
         XCTAssertEqual(a.mode, .empty)
     }
 
-    func testIdleShowsLiveCount() {
+    func testIdleShowsFleetCount() {
         let a = AggregateActivity.make(from: [
             snap(.idle, pid: 1), snap(.idle, pid: 2), snap(.stopped, pid: 3, alive: true),
         ], now: t0)
         XCTAssertEqual(a.mode, .idle)
-        XCTAssertEqual(a.iconStatus, .idle)
+        XCTAssertEqual(a.iconStatus, .idle)   // idle outranks stopped by precedence
+        XCTAssertEqual(a.total, 3)
         XCTAssertEqual(a.badge, "3")
         XCTAssertEqual(a.text, "")
         XCTAssertFalse(a.urgent)
+    }
+
+    func testSingleIdleHidesBadge() {
+        let a = AggregateActivity.make(from: [snap(.idle)], now: t0)
+        XCTAssertEqual(a.total, 1)
+        XCTAssertNil(a.badge)   // a bare "1" is noise
+    }
+
+    /// An alive session in an unrecognized/paused/stopped state must keep its own
+    /// glyph, not masquerade as a healthy green idle dot.
+    func testUnknownStatusKeepsItsOwnIcon() {
+        let a = AggregateActivity.make(from: [snap(.unknown("compacting"))], now: t0)
+        XCTAssertEqual(a.mode, .idle)
+        XCTAssertEqual(a.iconStatus, .unknown("compacting"))
     }
 
     // MARK: - Working
@@ -59,7 +75,7 @@ final class AggregateActivityTests: XCTestCase {
         let a = AggregateActivity.make(from: [s], now: t0)
         XCTAssertEqual(a.mode, .working)
         XCTAssertEqual(a.iconStatus, .busy)
-        XCTAssertNil(a.badge)
+        XCTAssertNil(a.badge)   // sole session
         XCTAssertEqual(a.text, "Bash · xcodebuild test")
         XCTAssertFalse(a.urgent)
     }
@@ -76,13 +92,25 @@ final class AggregateActivityTests: XCTestCase {
         XCTAssertEqual(a.text, "Read")
     }
 
-    func testWorkingMultiBadgesCountAndLeadsWithFreshest() {
-        // pid 2 updated more recently → it's the lead.
-        let older = busyWithTool(name: "Bash", preview: "old", startedAt: t0.addingTimeInterval(-30),
-                                 pid: 1, updatedAt: t0.addingTimeInterval(-20))
-        let fresher = busyWithTool(name: "Read", preview: "queue.ts", startedAt: t0.addingTimeInterval(-8),
-                                   pid: 2, updatedAt: t0.addingTimeInterval(-2))
-        let a = AggregateActivity.make(from: [older, fresher], now: t0)
+    func testWorkingWithBackgroundIdleShowsFleetCount() {
+        let busy = busyWithTool(name: "Bash", preview: "build", startedAt: t0.addingTimeInterval(-3), pid: 1)
+        let a = AggregateActivity.make(from: [busy, snap(.idle, pid: 2), snap(.idle, pid: 3)], now: t0)
+        XCTAssertEqual(a.mode, .working)
+        XCTAssertEqual(a.total, 3)
+        XCTAssertEqual(a.badge, "3")
+        XCTAssertEqual(a.text, "Bash · build")
+    }
+
+    /// Lead is chosen by the freshest *tool start* (a coreEqual field), not by
+    /// `updatedAt` (which the republish gate ignores). Here pid 1 has the fresher
+    /// `updatedAt` but pid 2 started its tool more recently → pid 2 leads.
+    func testWorkingLeadPicksFreshestToolStartNotUpdatedAt() {
+        let a = AggregateActivity.make(from: [
+            busyWithTool(name: "Bash", preview: "old", startedAt: t0.addingTimeInterval(-30),
+                         pid: 1, updatedAt: t0.addingTimeInterval(-1)),
+            busyWithTool(name: "Read", preview: "queue.ts", startedAt: t0.addingTimeInterval(-8),
+                         pid: 2, updatedAt: t0.addingTimeInterval(-25)),
+        ], now: t0)
         XCTAssertEqual(a.mode, .working)
         XCTAssertEqual(a.badge, "2")
         XCTAssertEqual(a.text, "Read · queue.ts")
@@ -91,8 +119,7 @@ final class AggregateActivityTests: XCTestCase {
     func testBusyWithoutToolFallsBackToTitle() {
         var e = EnrichedSession.empty
         e.aiTitle = "Refactor retry queue"
-        let s = snap(.busy, enriched: e)
-        let a = AggregateActivity.make(from: [s], now: t0)
+        let a = AggregateActivity.make(from: [snap(.busy, enriched: e)], now: t0)
         XCTAssertEqual(a.mode, .working)
         XCTAssertEqual(a.text, "Refactor retry queue")
     }
@@ -111,7 +138,7 @@ final class AggregateActivityTests: XCTestCase {
         let a = AggregateActivity.make(from: [snap(.waiting, enriched: e)], now: t0)
         XCTAssertEqual(a.mode, .needsYou)
         XCTAssertEqual(a.iconStatus, .waiting)
-        XCTAssertNil(a.badge)
+        XCTAssertNil(a.badge)   // sole session
         XCTAssertEqual(a.text, "approve Bash · rm -rf build")
         XCTAssertTrue(a.urgent)
     }
@@ -139,7 +166,7 @@ final class AggregateActivityTests: XCTestCase {
         XCTAssertEqual(a.text, "error")
     }
 
-    func testMultipleNeedsYouBadgesCountErrorIconWins() {
+    func testMultipleNeedsYouTextCarriesCountErrorIconWins() {
         var w = EnrichedSession.empty
         w.activeTools = [ActiveTool(id: "q", name: "Bash", preview: "x", startedAt: t0)]
         let a = AggregateActivity.make(from: [
@@ -147,20 +174,24 @@ final class AggregateActivityTests: XCTestCase {
             snap(.error, pid: 2, enriched: EnrichedSession.empty),
         ], now: t0)
         XCTAssertEqual(a.mode, .needsYou)
-        XCTAssertEqual(a.badge, "2")
-        XCTAssertEqual(a.text, "need you")
+        XCTAssertNil(a.badge)                  // the text carries the alert count
+        XCTAssertEqual(a.text, "2 need you")
         XCTAssertEqual(a.iconStatus, .error)
     }
 
-    // MARK: - Priority
+    // MARK: - Priority + fleet awareness
 
-    func testNeedsYouBeatsWorking() {
+    func testNeedsYouBeatsWorkingAndKeepsFleetCount() {
+        // 1 waiting + 1 busy: needs-you wins, and the fleet count surfaces so the
+        // busy background session isn't hidden.
         let busy = busyWithTool(name: "Bash", preview: "build", startedAt: t0, pid: 1)
         var w = EnrichedSession.empty
         w.activeTools = [ActiveTool(id: "q", name: "Edit", preview: "file.swift", startedAt: t0)]
         let waiting = snap(.waiting, pid: 2, enriched: w)
         let a = AggregateActivity.make(from: [busy, waiting], now: t0)
         XCTAssertEqual(a.mode, .needsYou)
+        XCTAssertEqual(a.total, 2)
+        XCTAssertEqual(a.badge, "2")
         XCTAssertEqual(a.text, "approve Edit · file.swift")
     }
 }

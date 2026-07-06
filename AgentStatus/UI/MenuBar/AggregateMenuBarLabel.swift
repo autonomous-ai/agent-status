@@ -15,7 +15,9 @@ struct AggregateMenuBarLabel: View {
                 Text(badge)
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(tint)
+                    // Neutral fleet count when calm; tinted only when urgent, so a
+                    // working "5" doesn't misread as "5 busy".
+                    .foregroundStyle(activity.urgent ? tint : .primary)
             }
             if !activity.text.isEmpty {
                 Text(activity.text)
@@ -23,6 +25,10 @@ struct AggregateMenuBarLabel: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(activity.urgent ? tint : .primary)
+                    // Cap only the growable text so a long tool preview can't push
+                    // the clock off-screen; icon + badge always stay visible and
+                    // the item still shrinks to fit short content.
+                    .frame(maxWidth: 220, alignment: .leading)
             }
         }
         .padding(.horizontal, activity.urgent ? 6 : 0)
@@ -33,9 +39,6 @@ struct AggregateMenuBarLabel: View {
                     .fill(tint.opacity(0.16))
             }
         }
-        // Width budget so a long tool preview can't push the clock off-screen;
-        // the tail truncates, icon + badge always stay visible.
-        .frame(maxWidth: 260, alignment: .leading)
         .accessibilityLabel(accessibilityLabel)
     }
 
@@ -57,11 +60,13 @@ struct AggregateMenuBarLabel: View {
     private var tint: Color { activity.iconStatus.color }
 
     private var accessibilityLabel: String {
+        if activity.mode == .empty { return "Agent Status — no live sessions" }
+        let sessions = "\(activity.total) session\(activity.total == 1 ? "" : "s")"
         switch activity.mode {
-        case .empty:    "Agent Status — no live sessions"
-        case .idle:     "Agent Status — \(activity.badge ?? "0") idle"
-        case .working:  "Agent Status — working: \(activity.text)"
-        case .needsYou: "Agent Status — needs you: \(activity.text)"
+        case .empty:    return ""   // handled above
+        case .idle:     return "Agent Status — \(sessions), \(activity.iconStatus.displayName)"
+        case .working:  return "Agent Status — \(sessions), working: \(activity.text)"
+        case .needsYou: return "Agent Status — \(sessions), needs you: \(activity.text)"
         }
     }
 }

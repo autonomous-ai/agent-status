@@ -12,4 +12,11 @@ enum ElapsedFormatter {
         let days = hours / 24
         return String(format: "%dd %02dh", days, hours % 24)
     }
+
+    /// Minute-granularity suffix for menu-bar activity lines: " · 3m" once at
+    /// least a minute has elapsed, else "". Shared by the aggregate menu-bar
+    /// activity line and the per-session row so their format never drifts.
+    static func minuteSuffix(_ seconds: TimeInterval) -> String {
+        seconds >= 60 ? " · \(Int(seconds) / 60)m" : ""
+    }
 }

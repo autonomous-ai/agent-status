@@ -19,10 +19,13 @@ final class AggregateLabelSnapshotRenderTests: XCTestCase {
             ("empty",          .make(from: [], now: t0)),
             ("idle (5)",       .make(from: (1...5).map { idle($0) }, now: t0)),
             ("working single", .make(from: [busy("Bash", "xcodebuild -scheme AgentStatus test", -95, 1)], now: t0)),
+            ("working + idle", .make(from: [busy("Bash", "npm run build", -95, 1)] + (2...5).map { idle($0) }, now: t0)),
             ("working multi",  .make(from: [busy("Bash", "npm run build", -40, 1, updated: -20),
                                             busy("Read", "queue.ts", -15, 2, updated: -2),
                                             busy("Agent", "audit retry paths", -9, 3, updated: -30)], now: t0)),
             ("waiting",        .make(from: [waiting("Bash", "rm -rf build", 1)], now: t0)),
+            ("waiting + fleet", .make(from: [waiting("Bash", "rm -rf build", 1),
+                                             busy("Read", "x", -5, 2), busy("Edit", "y", -5, 3)], now: t0)),
             ("needs you (2)",  .make(from: [waiting("Bash", "x", 1), errored(2)], now: t0)),
             ("error",          .make(from: [errored(1)], now: t0)),
         ]

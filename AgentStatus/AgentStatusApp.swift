@@ -11,7 +11,6 @@ struct AgentStatusApp: App {
                 .environmentObject(env.store)
                 .environmentObject(env.settings)
                 .environmentObject(env.commander)
-                .task { await env.boot() }
         } label: {
             // Wrap in a small observable view so the label re-renders when
             // store.aggregate publishes. Reading env.store.aggregate inline
@@ -40,9 +39,14 @@ struct AgentStatusApp: App {
 private struct MenuBarLabelView: View {
     @ObservedObject var store: SessionStore
     var body: some View {
-        // `now: Date()` is captured per render; the label re-renders whenever the
-        // store republishes (tool/status/token changes all flow through
-        // `coreEqual`), so the activity line stays current without a timer.
+        // `now: Date()` is sampled per render; the label re-renders on every store
+        // republish (tool/status/token changes all flow through `coreEqual`), so
+        // the activity line stays current. We deliberately do NOT drive this with a
+        // TimelineView: a periodic timeline in a MenuBarExtra *label* hangs the app
+        // at launch, and the codebase intentionally keeps timers off the menu bar
+        // (see StaticStatusIcon). Trade-off: the minute-granularity elapsed only
+        // advances on a republish — frequent during active work, but a lone
+        // multi-minute tool with no other change can show a stale suffix.
         AggregateMenuBarLabel(activity: AggregateActivity.make(from: store.snapshots, now: Date()))
     }
 }
