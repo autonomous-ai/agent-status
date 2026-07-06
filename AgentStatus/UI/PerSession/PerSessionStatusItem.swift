@@ -33,7 +33,7 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
         self.item = NSStatusBar.system.statusItem(withLength: Self.itemWidth)
         self.popover = NSPopover()
         self.popover.behavior = .transient
-        self.popover.contentSize = NSSize(width: 320, height: 260)
+        self.popover.contentSize = NSSize(width: 380, height: 470)
         // contentViewController stays nil until popover opens — see togglePopover().
 
         self.lastRowData = Self.rowData(from: initialSnapshot, now: Date(), showTasks: settings.showTaskList)

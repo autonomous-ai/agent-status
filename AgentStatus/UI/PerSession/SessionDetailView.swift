@@ -1,127 +1,106 @@
 import SwiftUI
 import AppKit
 
-/// Per-session popover content. Built lazily by PerSessionStatusItem so its
-/// timers and animations only run while the popover is on-screen.
+/// Per-session popover. Built lazily by `PerSessionStatusItem` so its timers only
+/// run while on-screen. Leads with the **same `AgentCard`** the Commander board
+/// uses — so the popover reads as one of those bold, status-tinted cards — then
+/// adds a compact, card-idiom detail section (approval, extra tools, token split,
+/// recent/tasks, prompts, metadata) below it.
 struct SessionDetailView: View {
     let snapshotId: String
+
+    var body: some View {
+        // One shared 1 Hz tick drives the card's elapsed and the detail rows —
+        // no per-section timers (matches the Commander board). The ScrollView
+        // lives here (not in SessionDetailContent) so the content renders
+        // headlessly for snapshot tests — ImageRenderer can't lay out a ScrollView.
+        TimelineView(.periodic(from: .now, by: 1)) { ctx in
+            ScrollView {
+                SessionDetailContent(snapshotId: snapshotId, now: ctx.date)
+            }
+            .frame(width: 380, height: 470)
+        }
+    }
+}
+
+/// Pure content of the popover for a pinned `now` (production passes the
+/// `TimelineView` date; tests pin it). A thin composition over `AgentCard` +
+/// detail sections so it renders headlessly for snapshot review.
+struct SessionDetailContent: View {
+    let snapshotId: String
+    let now: Date
     @EnvironmentObject var store: SessionStore
     @EnvironmentObject var settings: Settings
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 5)) { ctx in
-            content(now: ctx.date)
-        }
-    }
-
-    private func content(now: Date) -> some View {
         let snap = store.snapshots.first { $0.id == snapshotId }
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                if let s = snap {
-                    header(for: s, now: now)
-                    Divider()
-                    if s.enriched?.goalCondition != nil || s.enriched?.loopTarget != nil {
-                        autonomySection(for: s)
-                        Divider()
+        return VStack(alignment: .leading, spacing: 12) {
+            if let s = snap {
+                    // The card — identical to the Commander board tile, so the two
+                    // surfaces share one visual language (and one component).
+                    AgentCard(
+                        model: AgentCardModel.make(from: s, now: now),
+                        spend: store.history(for: s.id).tokenSeries(into: 60, span: 60, now: now),
+                        isSelected: false,
+                        onTap: {}
+                    )
+
+                    if s.status == .waiting { waitingSection(for: s) }
+
+                    // The card's hero shows the primary tool; list the rest here.
+                    if let active = s.enriched?.activeTools, active.count > 1 {
+                        runningNowSection(Array(active))
                     }
-                    if s.status == .waiting {
-                        waitingSection(for: s)
-                        Divider()
-                    }
-                    runningNowSection(for: s)
+
                     if settings.showTaskList, let todos = s.enriched?.todos, !todos.isEmpty {
                         todosSection(todos)
                     } else {
                         recentToolsSection(for: s)
                     }
-                    sparkline(for: s)
-                    Divider()
-                    if settings.showTokensAndCost, let tokens = s.enriched?.tokens, tokens.grandTotal > 0 {
-                        tokensSection(s.enriched!)
-                        Divider()
+
+                    if settings.showTokensAndCost, let e = s.enriched, e.tokens.grandTotal > 0 {
+                        tokenSplitSection(e)
                     }
-                    if settings.showAITitleAndLastPrompt {
-                        promptsSection(s.enriched)
-                    }
-                    metadata(for: s)
-                    Divider()
+
+                    if settings.showAITitleAndLastPrompt { promptsSection(s.enriched) }
+
+                    metadataSection(for: s)
                     actions(for: s)
-                } else {
-                    Text("Session is no longer running.")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                }
-            }
-            .padding(14)
-        }
-        .frame(width: 360, height: 420)
-    }
-
-    private func header(for s: SessionSnapshot, now: Date) -> some View {
-        HStack(spacing: 10) {
-            StatusRingIcon(status: s.status, size: 28, dim: !s.isAlive)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(displayTitle(for: s))
-                    .font(.system(.body).weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(s.cwdBasename)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(s.status.displayName)
-                    .font(.caption)
-                    .foregroundStyle(s.status.color)
-                Text(ElapsedFormatter.short(from: s.startedAt, to: now))
-                    .font(.caption2)
+            } else {
+                Text("Session is no longer running.")
                     .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-        }
-    }
-
-    /// Goal / loop banner. A session under a `/goal` or in a `/loop` is running
-    /// itself toward a condition — the most important context for "is this
-    /// session actually done?", so it sits right under the header.
-    @ViewBuilder
-    private func autonomySection(for s: SessionSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let goal = s.enriched?.goalCondition {
-                autonomyRow(glyph: "target", title: "Goal", text: goal, tint: .pink)
-            }
-            if let loop = s.enriched?.loopTarget {
-                autonomyRow(glyph: "repeat", title: "Loop", text: loop, tint: .teal)
-            }
-        }
-    }
-
-    private func autonomyRow(glyph: String, title: String, text: String, tint: Color) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: glyph)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(tint)
-                .frame(width: 14)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title.uppercased())
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(tint)
-                Text(text)
                     .font(.caption)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, minHeight: 120)
             }
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func displayTitle(for s: SessionSnapshot) -> String {
-        if settings.showAITitleAndLastPrompt, let t = s.enriched?.aiTitle, !t.isEmpty {
-            return t
-        }
-        return s.fallbackTitle
+    // MARK: - Section chrome
+
+    /// Bold small-caps section label — the card idiom, replacing the old gray
+    /// `.caption2` headers.
+    private func sectionLabel(_ text: String, tint: Color = .secondary) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 10, weight: .heavy))
+            .foregroundStyle(tint)
+            .tracking(0.8)
     }
+
+    /// A detail block: a subtle rounded surface so each group reads as a distinct
+    /// card-like panel rather than a divider-separated table row.
+    private func panel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) { content() }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+            )
+    }
+
+    // MARK: - Waiting
 
     @ViewBuilder
     private func waitingSection(for s: SessionSnapshot) -> some View {
@@ -132,23 +111,34 @@ struct SessionDetailView: View {
         if let display = TranscriptTailer.waitingDisplay(
             for: s.waitingFor, pending: pending, pendingInput: pendingInput
         ) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: "bell.badge.fill").foregroundStyle(.orange)
-                    Text("Waiting · \(headlineLabel(for: display))")
-                        .font(.subheadline.weight(.semibold))
+                    Text(headlineLabel(for: display))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.orange)
                 }
                 detailLines(for: display)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.orange.opacity(0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+            )
         }
     }
 
     private func headlineLabel(for d: WaitingDisplay) -> String {
         switch d {
-        case .tool(let name, _):              return "approve \(name)"
-        case .askUserQuestion:                 return "approve AskUserQuestion"
-        case .subagent:                        return "approve Task"
-        case .unknown(let raw):                return raw
+        case .tool(let name, _):  "Waiting · approve \(name)"
+        case .askUserQuestion:    "Waiting · approve AskUserQuestion"
+        case .subagent:           "Waiting · approve Task"
+        case .unknown(let raw):   "Waiting · \(raw)"
         }
     }
 
@@ -164,11 +154,10 @@ struct SessionDetailView: View {
                     .truncationMode(.tail)
                     .textSelection(.enabled)
             }
-
         case .askUserQuestion(let text, let options):
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 if !text.isEmpty {
-                    Text("\u{201C}\(text)\u{201D}")     // "…"
+                    Text("\u{201C}\(text)\u{201D}")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(3)
@@ -181,9 +170,8 @@ struct SessionDetailView: View {
                         .truncationMode(.tail)
                 }
             }
-
         case .subagent(let description, let prompt):
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 if !description.isEmpty {
                     Text(description)
                         .font(.system(size: 11, design: .monospaced))
@@ -198,139 +186,92 @@ struct SessionDetailView: View {
                         .truncationMode(.tail)
                 }
             }
-
         case .unknown:
             EmptyView()
         }
     }
 
-    @ViewBuilder
-    private func runningNowSection(for s: SessionSnapshot) -> some View {
-        let active = s.enriched?.activeTools ?? []
-        if !active.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Running now (\(active.count))")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                // ONE shared TimelineView wraps all rows — single 1 Hz tick
-                // for the whole section instead of one per tool. Lives only
-                // while the popover is on screen.
-                TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                    let visible = Array(active.prefix(5))
-                    let overflow = active.count - visible.count
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(visible, id: \.id) { tool in
-                            runningRow(for: tool, now: ctx.date,
-                                       isWaitingChild: s.status == .waiting)
-                        }
-                        if overflow > 0 {
-                            Text("+\(overflow) more\u{2026}")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.tertiary)
-                        }
+    // MARK: - Running now (the tools beyond the card's hero)
+
+    private func runningNowSection(_ active: [ActiveTool]) -> some View {
+        let visible = Array(active.prefix(5))
+        let overflow = active.count - visible.count
+        return panel {
+            sectionLabel("Running now (\(active.count))", tint: .blue)
+            ForEach(visible, id: \.id) { tool in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "bolt.fill").font(.system(size: 10)).foregroundStyle(.blue)
+                    Text(tool.name).font(.system(size: 11, weight: .medium))
+                    if !tool.preview.isEmpty {
+                        Text(tool.preview)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.tail)
                     }
+                    Spacer()
+                    Text(elapsed(from: tool.startedAt))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary).monospacedDigit()
                 }
             }
-        }
-    }
-
-    private func runningRow(for tool: ActiveTool, now: Date, isWaitingChild: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: "bolt.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(isWaitingChild ? .orange : .blue)
-            Text(tool.name)
-                .font(.system(size: 11, weight: .medium))
-            if !tool.preview.isEmpty {
-                Text(tool.preview)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            if overflow > 0 {
+                Text("+\(overflow) more\u{2026}").font(.system(size: 11)).foregroundStyle(.tertiary)
             }
-            Spacer()
-            Text(formatElapsed(from: tool.startedAt, to: now))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
         }
     }
 
-    /// Elapsed-time display for in-flight tools. Format matches `formatDuration`'s
-    /// over-60s case (`Nm Ms`) but uses integer seconds even below 60 — Recent's
-    /// `.1f` precision is useful for finished sub-second calls; Running ticks at
-    /// 1 Hz so decimals would just jitter without adding information. The bolt
-    /// icon + section header already signal "still elapsing"; no `t+` prefix.
-    private func formatElapsed(from start: Date, to now: Date) -> String {
+    private func elapsed(from start: Date) -> String {
         let secs = max(0, Int(now.timeIntervalSince(start)))
         if secs < 60 { return "\(secs)s" }
-        let m = secs / 60, s = secs % 60
-        return "\(m)m\(s)s"
+        return "\(secs / 60)m\(secs % 60)s"
     }
+
+    // MARK: - Recent tools
 
     @ViewBuilder
     private func recentToolsSection(for s: SessionSnapshot) -> some View {
         let recent = s.enriched?.recentTools ?? []
         if !recent.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Recent (\(recent.count))")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(recent, id: \.id) { tool in
-                        recentRow(for: tool)
+            panel {
+                sectionLabel("Recent (\(recent.count))")
+                ForEach(recent, id: \.id) { tool in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: tool.isError ? "xmark" : "checkmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(tool.isError ? .red : .green)
+                        Text(tool.name).font(.system(size: 11, weight: .medium))
+                        if !tool.preview.isEmpty {
+                            Text(tool.preview)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1).truncationMode(.tail)
+                        }
+                        Spacer()
+                        Text(formatDuration(tool.duration))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(tool.isError ? .red.opacity(0.8) : .secondary)
+                            .monospacedDigit()
                     }
                 }
             }
         }
     }
 
-    private func recentRow(for tool: CompletedTool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: tool.isError ? "xmark" : "checkmark")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(tool.isError ? .red : .green)
-            Text(tool.name)
-                .font(.system(size: 11, weight: .medium))
-            if !tool.preview.isEmpty {
-                Text(tool.preview)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            Spacer()
-            Text(formatDuration(tool.duration))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(tool.isError ? .red.opacity(0.8) : .secondary)
-                .monospacedDigit()
-        }
-    }
-
     private func formatDuration(_ d: TimeInterval) -> String {
-        if d < 1 { return String(format: "%.1fs", d) }
         if d < 60 { return String(format: "%.1fs", d) }
-        let m = Int(d) / 60, s = Int(d) % 60
-        return "\(m)m\(s)s"
+        return "\(Int(d) / 60)m\(Int(d) % 60)s"
     }
 
-    // MARK: - Task list
+    // MARK: - Tasks
 
-    @ViewBuilder
     private func todosSection(_ todos: [TodoItem]) -> some View {
         let rows = TodoDisplay.rows(from: todos)
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Tasks (\(rows.completedCount)/\(rows.totalCount))")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(rows.visible, id: \.id) { todoRow($0) }
-                if rows.hiddenCompletedCount > 0 {
-                    Text("… +\(rows.hiddenCompletedCount) completed")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .padding(.leading, 18)
-                }
+        return panel {
+            sectionLabel("Tasks (\(rows.completedCount)/\(rows.totalCount))", tint: .blue)
+            ForEach(rows.visible, id: \.id) { todoRow($0) }
+            if rows.hiddenCompletedCount > 0 {
+                Text("\u{2026} +\(rows.hiddenCompletedCount) completed")
+                    .font(.system(size: 11)).foregroundStyle(.tertiary).padding(.leading, 18)
             }
         }
     }
@@ -347,8 +288,7 @@ struct SessionDetailView: View {
                 .font(.system(size: 11, weight: inProgress ? .semibold : .regular))
                 .foregroundStyle(done ? .secondary : .primary)
                 .strikethrough(done, color: .secondary)
-                .lineLimit(2)
-                .truncationMode(.tail)
+                .lineLimit(2).truncationMode(.tail)
             Spacer(minLength: 0)
         }
     }
@@ -357,7 +297,7 @@ struct SessionDetailView: View {
         switch status {
         case .inProgress: "circle.lefthalf.filled"
         case .completed:  "checkmark.square.fill"
-        default:          "square"          // pending (and any future state)
+        default:          "square"
         }
     }
 
@@ -369,91 +309,60 @@ struct SessionDetailView: View {
         }
     }
 
-    private func sparkline(for s: SessionSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Last 60s").font(.caption2).foregroundStyle(.tertiary)
-            SparklineView(buckets: store.history(for: s.id).bucket(into: 60, span: 60), height: 22)
-        }
-    }
+    // MARK: - Token split (card shows the total/cost/context; this is the breakdown)
 
-    private func tokensSection(_ e: EnrichedSession) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Tokens & cost").font(.caption2).foregroundStyle(.tertiary)
-                Spacer()
-                if let m = e.currentModel { Text(m).font(.caption2.monospaced()).foregroundStyle(.secondary) }
+    private func tokenSplitSection(_ e: EnrichedSession) -> some View {
+        panel {
+            sectionLabel("Token breakdown")
+            HStack(spacing: 16) {
+                tokenStat("in", e.tokens.input)
+                tokenStat("out", e.tokens.output)
+                tokenStat("cache r", e.tokens.cacheRead)
+                tokenStat("cache w", e.tokens.cacheCreation)
+                Spacer(minLength: 0)
             }
-            HStack(spacing: 10) {
-                tokenStat("in",       e.tokens.input)
-                tokenStat("out",      e.tokens.output)
-                tokenStat("c-read",   e.tokens.cacheRead)
-                tokenStat("c-write",  e.tokens.cacheCreation)
-                Spacer()
-                Text(e.estimatedCost.asUSD)
-                    .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-            }
-            if e.contextTokens > 0 { contextGauge(e) }
-        }
-    }
-
-    /// Live context-window fill — the "how close to auto-compaction" gauge.
-    @ViewBuilder
-    private func contextGauge(_ e: EnrichedSession) -> some View {
-        let limit = ContextWindow.limit(for: e.currentModel)
-        let frac = limit == 0 ? 0 : min(1.0, Double(e.contextTokens) / Double(limit))
-        let tint: Color = frac > 0.85 ? .red : (frac > 0.6 ? .orange : .cyan)
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text("context").font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary)
-                Spacer()
-                Text("\(TokenUsage.compact(e.contextTokens)) / \(TokenUsage.compact(limit)) · \(Int((frac * 100).rounded()))%")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.secondary.opacity(0.18))
-                    Capsule().fill(tint).frame(width: max(2, geo.size.width * frac))
-                }
-            }
-            .frame(height: 4)
         }
     }
 
     private func tokenStat(_ label: String, _ n: Int) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(label).font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary)
-            Text(TokenUsage.compact(n)).font(.system(size: 11, design: .monospaced)).monospacedDigit()
+            Text(TokenUsage.compact(n))
+                .font(.system(size: 12, weight: .semibold, design: .rounded)).monospacedDigit()
         }
     }
 
+    // MARK: - Prompts
+
+    @ViewBuilder
     private func promptsSection(_ e: EnrichedSession?) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let p = e?.lastUserPrompt, !p.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Last prompt").font(.caption2).foregroundStyle(.tertiary)
+        let hasPrompt = !(e?.lastUserPrompt ?? "").isEmpty
+        let hasReply = !(e?.lastAssistantText ?? "").isEmpty
+        if hasPrompt || hasReply {
+            panel {
+                if let p = e?.lastUserPrompt, !p.isEmpty {
+                    sectionLabel("Last prompt")
                     Text(p).font(.caption).lineLimit(3).truncationMode(.tail).textSelection(.enabled)
                 }
-            }
-            if let r = e?.lastAssistantText, !r.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Last reply").font(.caption2).foregroundStyle(.tertiary)
+                if let r = e?.lastAssistantText, !r.isEmpty {
+                    sectionLabel("Last reply").padding(.top, hasPrompt ? 4 : 0)
                     Text(r).font(.caption).lineLimit(3).truncationMode(.tail).textSelection(.enabled)
                 }
             }
         }
     }
 
-    private func metadata(for s: SessionSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+    // MARK: - Metadata
+
+    private func metadataSection(for s: SessionSnapshot) -> some View {
+        panel {
+            sectionLabel("Details")
             row("path", s.cwd.path, monospaced: true)
             if let b = s.enriched?.gitBranch { row("branch", b, monospaced: true) }
-            if let w = s.waitingFor { row("waiting", w) }
             if settings.showPermissionMode, let m = s.enriched?.permissionMode { row("mode", m) }
             if let n = s.enriched?.subagentName { row("agent", n) }
             if let v = s.version { row("version", v) }
-            if let k = s.kind    { row("kind", k) }
+            if let k = s.kind { row("kind", k) }
             if let e = s.enriched, e.assistantTurns > 0 { row("turns", "\(e.assistantTurns)") }
             if let e = s.enriched, e.toolCalls > 0 {
                 row("tools", "\(e.toolCalls) calls\(e.errorCount > 0 ? " · \(e.errorCount) errors" : "")")
@@ -470,13 +379,12 @@ struct SessionDetailView: View {
                 .frame(width: 56, alignment: .trailing)
             Text(value)
                 .font(monospaced ? .system(size: 11, design: .monospaced) : .system(size: 11))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
+                .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
         }
     }
 
-    @ViewBuilder
+    // MARK: - Actions
+
     private func actions(for s: SessionSnapshot) -> some View {
         HStack(spacing: 8) {
             Button("Reveal in Finder") {
@@ -486,6 +394,7 @@ struct SessionDetailView: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString("\(s.pid)", forType: .string)
             }
+            Spacer(minLength: 0)
         }
         .controlSize(.small)
         .font(.caption)
