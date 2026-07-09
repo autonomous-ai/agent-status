@@ -189,7 +189,7 @@ final class PerSessionStatusItem: NSObject, NSPopoverDelegate {
             // is already sorted ascending by startedAt (see TranscriptTailer.
             // recomputeActiveAndRecent), so `.first` is the earliest.
             let elapsedSeconds = max(0, now.timeIntervalSince(active[0].startedAt))
-            let minutesSuffix = elapsedSeconds >= 60 ? " · \(Int(elapsedSeconds) / 60)m" : ""
+            let minutesSuffix = ElapsedFormatter.minuteSuffix(elapsedSeconds)
 
             if active.count == 1 {
                 let tool = active[0]
